@@ -3,6 +3,13 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  /* RukaPay brand — swap these to change the app base color */
+  --rukapay-primary: #08163d;
+  --rukapay-primary-hover: #06122f;
+  --rukapay-primary-muted: #0e2e5c;
+  /* Sidebar accents track the brand color */
+  --sidebar-base: var(--rukapay-primary);
+  --sidebar-base-muted: color-mix(in srgb, var(--rukapay-primary) 18%, white);
 }
 
 @theme inline {
@@ -12,15 +19,8 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
