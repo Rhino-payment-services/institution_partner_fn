@@ -7,6 +7,19 @@ import { clearSession, getAccessToken, setSession } from "./auth";
 type AuthUser = {
   email?: string;
   phone?: string;
+  scope?: "PARTNER" | "INSTITUTION";
+  permissions?: {
+    role?: string;
+    canViewTransactions?: boolean;
+    canManageMembers?: boolean;
+    canManageInstitution?: boolean;
+    canRequestLiquidation?: boolean;
+  };
+  institution?: {
+    id?: string;
+    code?: string;
+    name?: string;
+  };
   partner?: {
     id?: string;
     partnerName?: string;

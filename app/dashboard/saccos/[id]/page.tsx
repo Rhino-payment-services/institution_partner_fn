@@ -3,13 +3,25 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { listPartnerSaccos, listSaccoTransactions } from "@/lib/api";
+import {
+  listPartnerSaccos,
+  listSaccoTransactions,
+} from "@/lib/api";
 import { ipc } from "@/lib/dashboard-ui";
 
 type SaccoItem = {
   id: string;
   code?: string;
   name?: string;
+  metadata?: {
+    withdrawals?: {
+      enabled?: boolean;
+      savings?: boolean;
+      shares?: boolean;
+      minimumAmount?: number;
+      maximumAmount?: number;
+    };
+  };
   totalCollectedBalance?: number;
   balanceCurrency?: string;
   _count?: {
@@ -198,7 +210,6 @@ export default function SaccoDetailPage() {
           {error}
         </p>
       )}
-
       <section className={`${ipc.card} ${ipc.cardPad}`}>
         <h3 className="text-lg font-semibold tracking-tight text-slate-900">Transactions</h3>
         <p className="mt-1 text-sm leading-relaxed text-slate-600">

@@ -1,23 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  createPartnerLiquidationRequest,
-  getSettlementWalletPreview,
+  cancelLiquidationRequest,
   listPartnerLiquidations,
-  listPartnerSaccos,
   type PartnerLiquidation,
 } from "@/lib/api";
 import { institutionStatusBadgeClass, ipc } from "@/lib/dashboard-ui";
-
-type SaccoRow = {
-  id: string;
-  code?: string;
-  name?: string;
-  wallets?: Array<{ id?: string; walletType?: string; balance?: unknown; currency?: string }>;
-  totalCollectedBalance?: number;
-};
 
 function formatMoney(n: number, ccy = "UGX") {
   return `${ccy} ${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
@@ -35,28 +25,18 @@ function liquidationStatusClass(status: string | undefined) {
 
 export default function LiquidationPage() {
   const [rows, setRows] = useState<PartnerLiquidation[]>([]);
-  const [saccos, setSaccos] = useState<SaccoRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [feedback, setFeedback] = useState("");
-  const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
-  const [institutionId, setInstitutionId] = useState("");
-  const [amount, setAmount] = useState("");
-  const [reason, setReason] = useState("");
-  const [manualSettlementNote, setManualSettlementNote] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [formError, setFormError] = useState("");
+  const [selectedRow, setSelectedRow] = useState<PartnerLiquidation | null>(null);
+  const [cancellingId, setCancellingId] = useState<string>("");
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const [liq, list] = await Promise.all([
-        listPartnerLiquidations(),
-        listPartnerSaccos() as Promise<SaccoRow[]>,
-      ]);
+      const liq = await listPartnerLiquidations();
       setRows(liq);
-      setSaccos(Array.isArray(list) ? list : []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load liquidation data");
     } finally {
@@ -67,20 +47,6 @@ export default function LiquidationPage() {
   useEffect(() => {
     void load();
   }, [load]);
-
-  const settlementPreview = useMemo(() => {
-    if (!institutionId) return null;
-    const inst = saccos.find((s) => String(s.id) === institutionId);
-    if (!inst) return null;
-    return getSettlementWalletPreview(inst);
-  }, [institutionId, saccos]);
-
-  const institutionTotalAcrossWallets = useMemo(() => {
-    if (!institutionId) return null;
-    const inst = saccos.find((s) => String(s.id) === institutionId);
-    if (!inst || inst.totalCollectedBalance == null) return null;
-    return Number(inst.totalCollectedBalance);
-  }, [institutionId, saccos]);
 
   const metrics = useMemo(() => {
     const terminal = new Set([
@@ -102,53 +68,19 @@ export default function LiquidationPage() {
     return { open, pendingVal, settled, total: rows.length };
   }, [rows]);
 
-  function openRequestModal() {
-    setFormError("");
-    setIsRequestModalOpen(true);
-  }
 
-  function closeRequestModal() {
-    setIsRequestModalOpen(false);
-    setFormError("");
-  }
-
-  async function onSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    if (!institutionId.trim()) {
-      setFormError("Select a SACCO.");
-      return;
-    }
-    const amt = Number(amount);
-    if (!Number.isFinite(amt) || amt <= 0) {
-      setFormError("Enter a valid amount greater than zero.");
-      return;
-    }
-    setSubmitting(true);
-    setFormError("");
+  async function onCancel(row: PartnerLiquidation) {
+    if (!row.id) return;
+    if (!window.confirm("Cancel this liquidation request?")) return;
     try {
-      const res = await createPartnerLiquidationRequest({
-        institutionId: institutionId.trim(),
-        amount: amt,
-        currency: "UGX",
-        reason: reason.trim() || undefined,
-        manualSettlementNote: manualSettlementNote.trim() || undefined,
-      });
-      setFeedback(
-        res?.message ||
-          (res?.reference
-            ? `Request submitted. Reference ${res.reference}. Pending admin approval before the wallet is debited.`
-            : "Liquidation request submitted. Pending admin approval."),
-      );
-      setInstitutionId("");
-      setAmount("");
-      setReason("");
-      setManualSettlementNote("");
-      closeRequestModal();
+      setCancellingId(row.id);
+      const res = await cancelLiquidationRequest(row.id, "Cancelled by requester");
+      setFeedback(res?.message || "Liquidation request cancelled.");
       await load();
-    } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Could not submit request");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to cancel request");
     } finally {
-      setSubmitting(false);
+      setCancellingId("");
     }
   }
 
@@ -171,9 +103,9 @@ export default function LiquidationPage() {
             </p>
           </div>
           <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
-            <button type="button" onClick={openRequestModal} className={`${ipc.btnPrimary} rounded-xl px-5`}>
+            <Link href="/dashboard/liquidation/new" className={`${ipc.btnPrimary} rounded-xl px-5 no-underline`}>
               New liquidation request
-            </button>
+            </Link>
             <button
               type="button"
               onClick={() => void load()}
@@ -248,9 +180,9 @@ export default function LiquidationPage() {
                 <p className="mt-1 text-sm text-slate-600">References, SACCO, status, and amounts.</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <button type="button" onClick={openRequestModal} className={`${ipc.btnPrimary} rounded-xl text-sm`}>
+                <Link href="/dashboard/liquidation/new" className={`${ipc.btnPrimary} rounded-xl text-sm no-underline`}>
                   New request
-                </button>
+                </Link>
                 <Link href="/dashboard/saccos" className={`${ipc.btnSecondary} rounded-xl text-sm no-underline`}>
                   Manage SACCOs
                 </Link>
@@ -265,19 +197,20 @@ export default function LiquidationPage() {
                     <th className={ipc.th}>Status</th>
                     <th className={ipc.th}>Amount</th>
                     <th className={ipc.th}>Requested</th>
+                    <th className={ipc.th}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {loading && (
                     <tr>
-                      <td className={`${ipc.td} text-slate-500`} colSpan={5}>
+                      <td className={`${ipc.td} text-slate-500`} colSpan={6}>
                         Loading…
                       </td>
                     </tr>
                   )}
                   {!loading && rows.length === 0 && (
                     <tr>
-                      <td className={`${ipc.td} py-10 text-center text-slate-600`} colSpan={5}>
+                      <td className={`${ipc.td} py-10 text-center text-slate-600`} colSpan={6}>
                         No liquidation items to display.
                       </td>
                     </tr>
@@ -308,6 +241,27 @@ export default function LiquidationPage() {
                             : row.updatedAt
                               ? new Date(row.updatedAt).toLocaleString()
                               : "—"}
+                        </td>
+                        <td className={ipc.td}>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              className={`${ipc.btnSecondary} rounded-lg px-2.5 py-1 text-xs`}
+                              onClick={() => setSelectedRow(row)}
+                            >
+                              Open
+                            </button>
+                            {String(row.status || "").toUpperCase().includes("PENDING") && (
+                              <button
+                                type="button"
+                                className={`${ipc.btnSecondary} rounded-lg px-2.5 py-1 text-xs`}
+                                disabled={cancellingId === row.id}
+                                onClick={() => void onCancel(row)}
+                              >
+                                {cancellingId === row.id ? "Cancelling..." : "Cancel"}
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -343,167 +297,31 @@ export default function LiquidationPage() {
           </section>
         </div>
       </div>
-
-      {isRequestModalOpen && (
-        <div
-          className={ipc.modalOverlay}
-          role="presentation"
-          onClick={() => !submitting && closeRequestModal()}
-        >
-          <div
-            className={ipc.modalPanel}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="liq-modal-title"
-            onClick={(e) => e.stopPropagation()}
-          >
+      {selectedRow && (
+        <div className={ipc.modalOverlay} role="presentation" onClick={() => setSelectedRow(null)}>
+          <div className={ipc.modalPanel} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
             <div className={ipc.modalHeader}>
               <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h3 id="liq-modal-title" className="text-lg font-semibold tracking-tight text-slate-900">
-                    New liquidation request
-                  </h3>
-                  <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
-                    Only the{" "}
-                    <span className="font-medium text-slate-800">PARTNER</span> settlement wallet balance in Core
-                    counts. If you see 0 available below, that wallet is empty — even if the SACCO has funds
-                    elsewhere.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => !submitting && closeRequestModal()}
-                  className={ipc.modalClose}
-                >
+                <h3 className="text-lg font-semibold text-slate-900">Liquidation details</h3>
+                <button type="button" className={ipc.modalClose} onClick={() => setSelectedRow(null)}>
                   Close
                 </button>
               </div>
             </div>
-            <form onSubmit={onSubmit}>
-              <div className={`${ipc.modalBody} space-y-5`}>
-                {formError && (
-                  <div
-                    className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
-                    role="alert"
-                  >
-                    {formError}
-                  </div>
-                )}
-                <div>
-                  <label htmlFor="liq-sacco" className={ipc.formLabel}>
-                    SACCO
-                  </label>
-                  <select
-                    id="liq-sacco"
-                    value={institutionId}
-                    onChange={(e) => setInstitutionId(e.target.value)}
-                    className={`${ipc.input} mt-2`}
-                    required
-                  >
-                    <option value="">Select institution</option>
-                    {saccos.map((s) => (
-                      <option key={String(s.id)} value={String(s.id)}>
-                        {String(s.code || "")} — {String(s.name || "")}
-                      </option>
-                    ))}
-                  </select>
-                  {settlementPreview && (
-                    <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs leading-relaxed text-slate-700">
-                      <p className="font-semibold text-slate-900">Settlement wallet in Core (this request)</p>
-                      <p className="mt-1">
-                        Available:{" "}
-                        <span className="font-medium tabular-nums text-slate-900">
-                          {formatMoney(settlementPreview.balance, settlementPreview.currency)}
-                        </span>
-                        <span className="text-slate-500">
-                          {" "}
-                          · wallet type <span className="font-mono">{settlementPreview.walletType || "—"}</span>
-                        </span>
-                      </p>
-                      {!settlementPreview.isPartnerWallet && (
-                        <p className="mt-2 text-amber-800">
-                          No PARTNER wallet found; using the first linked wallet. Ask support to ensure a PARTNER
-                          settlement wallet exists for this SACCO.
-                        </p>
-                      )}
-                      {institutionTotalAcrossWallets != null &&
-                        Math.abs(institutionTotalAcrossWallets - settlementPreview.balance) > 0.009 && (
-                          <p className="mt-2 text-slate-600">
-                            Sum of all wallets on this institution in Core:{" "}
-                            <span className="font-medium tabular-nums">
-                              {formatMoney(institutionTotalAcrossWallets)}
-                            </span>
-                            . If higher than available above, funds are in another wallet type — not usable for
-                            this liquidation until moved to the settlement wallet.
-                          </p>
-                        )}
-                    </div>
-                  )}
-                </div>
-                <div>
-                  <label htmlFor="liq-amount" className={ipc.formLabel}>
-                    Amount <span className="text-red-600">*</span>
-                  </label>
-                  <input
-                    id="liq-amount"
-                    inputMode="decimal"
-                    required
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                    placeholder="Amount in UGX"
-                    className={`${ipc.input} mt-2`}
-                  />
-                </div>
-                <div>
-                  <label htmlFor="liq-reason" className={ipc.formLabel}>
-                    Reason <span className="font-normal normal-case text-slate-400">(optional)</span>
-                  </label>
-                  <textarea
-                    id="liq-reason"
-                    value={reason}
-                    onChange={(e) => setReason(e.target.value)}
-                    placeholder="Why you are liquidating (shown on the transaction)"
-                    rows={2}
-                    className={`${ipc.input} mt-2 min-h-[72px] resize-y`}
-                  />
-                </div>
-                <div>
-                  <label htmlFor="liq-manual" className={ipc.formLabel}>
-                    Manual settlement note{" "}
-                    <span className="font-normal normal-case text-slate-400">(optional)</span>
-                  </label>
-                  <textarea
-                    id="liq-manual"
-                    value={manualSettlementNote}
-                    onChange={(e) => setManualSettlementNote(e.target.value)}
-                    placeholder="Instructions for offline bank/cash settlement"
-                    rows={3}
-                    className={`${ipc.input} mt-2 min-h-[88px] resize-y`}
-                  />
-                </div>
-                {!saccos.length && (
-                  <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                    Create a SACCO first, then open this dialog again.
-                  </p>
-                )}
+            <div className={`${ipc.modalBody} space-y-3 text-sm`}>
+              <p><span className="font-semibold">Reference:</span> {selectedRow.reference || selectedRow.id}</p>
+              <p><span className="font-semibold">SACCO:</span> {selectedRow.saccoCode || "—"} {selectedRow.saccoName ? `(${selectedRow.saccoName})` : ""}</p>
+              <p><span className="font-semibold">Status:</span> {selectedRow.status || "PENDING"}</p>
+              <p><span className="font-semibold">Amount:</span> {selectedRow.amount != null ? formatMoney(Number(selectedRow.amount), selectedRow.currency || "UGX") : "—"}</p>
+              <p><span className="font-semibold">Method:</span> {selectedRow.payoutMethod || "—"}</p>
+              <p><span className="font-semibold">Note:</span> {selectedRow.notes || "—"}</p>
+              <div>
+                <p className="font-semibold">Payout details</p>
+                <pre className="mt-1 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs text-slate-700">
+{JSON.stringify(selectedRow.payoutDetails || {}, null, 2)}
+                </pre>
               </div>
-              <div className={ipc.modalFooter}>
-                <button
-                  type="button"
-                  onClick={() => !submitting && closeRequestModal()}
-                  className={`${ipc.btnSecondary} w-full rounded-xl sm:w-auto`}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={submitting || !saccos.length}
-                  className={`${ipc.btnPrimary} w-full rounded-xl px-6 sm:w-auto`}
-                >
-                  {submitting ? "Submitting…" : "Submit liquidation request"}
-                </button>
-              </div>
-            </form>
+            </div>
           </div>
         </div>
       )}

@@ -1,6 +1,7 @@
 "use client";
 
 import { API_CONFIG, APP_CONFIG } from "./config";
+import { clearSession } from "./auth";
 
 type LoginPayload = {
   email: string;
@@ -55,16 +56,56 @@ type CreateSaccoPayload = {
   code: string;
   name: string;
   externalOrgId?: string;
+  createInitialStaffLogin?: boolean;
+  initialStaffEmail?: string;
+  initialStaffPhone?: string;
+  initialStaffFirstName?: string;
+  initialStaffLastName?: string;
+  initialStaffPassword?: string;
+  initialStaffRole?: "OWNER" | "ADMIN" | "OPERATOR" | "VIEWER";
 };
 
 type CreateSaccoUserPayload = {
   firstName: string;
   lastName: string;
   phone: string;
+  nationalId: string;
   email?: string;
   accountNo?: string;
   clientId?: string;
   status?: string;
+};
+
+type CreateSaccoStaffPayload = {
+  firstName: string;
+  lastName: string;
+  phone: string;
+  email: string;
+  password: string;
+  role?: "OWNER" | "ADMIN" | "OPERATOR" | "VIEWER";
+  canViewTransactions?: boolean;
+  canManageMembers?: boolean;
+  canManageInstitution?: boolean;
+  canRequestLiquidation?: boolean;
+};
+
+type PartnerStaffRole = "OWNER" | "ADMIN" | "DEVELOPER" | "MEMBER" | "VIEWER";
+
+type CreatePartnerStaffPayload = {
+  email: string;
+  password: string;
+  firstName?: string;
+  lastName?: string;
+  phoneNumber?: string;
+  role: PartnerStaffRole;
+};
+
+type UpdateSaccoWithdrawalSettingsPayload = {
+  enabled?: boolean;
+  savings?: boolean;
+  shares?: boolean;
+  minimumAmount?: number;
+  maximumAmount?: number;
 };
 
 function getAuthHeaders() {
@@ -75,8 +116,25 @@ function getAuthHeaders() {
   };
 }
 
+function logoutOnUnauthorized() {
+  if (typeof window === "undefined") return;
+  clearSession();
+  if (window.location.pathname !== "/") {
+    window.location.href = "/";
+  }
+}
+
+async function authFetch(input: RequestInfo | URL, init?: RequestInit) {
+  const response = await fetch(input, init);
+  if (response.status === 401) {
+    logoutOnUnauthorized();
+    throw new Error("Session expired. Please login again.");
+  }
+  return response;
+}
+
 export async function listPartnerSaccos() {
-  const response = await fetch(`${API_CONFIG.baseUrl}/partner-institutions`, {
+  const response = await authFetch(`${API_CONFIG.baseUrl}/partner-institutions`, {
     headers: getAuthHeaders(),
   });
 
@@ -86,7 +144,7 @@ export async function listPartnerSaccos() {
 }
 
 export async function createPartnerSacco(payload: CreateSaccoPayload) {
-  const response = await fetch(`${API_CONFIG.baseUrl}/partner-institutions`, {
+  const response = await authFetch(`${API_CONFIG.baseUrl}/partner-institutions`, {
     method: "POST",
     headers: getAuthHeaders(),
     body: JSON.stringify({
@@ -103,8 +161,132 @@ export async function createPartnerSacco(payload: CreateSaccoPayload) {
   return data;
 }
 
+export async function createSaccoStaff(institutionId: string, payload: CreateSaccoStaffPayload) {
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/staff`,
+    {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload),
+    },
+  );
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to create SACCO staff");
+  return data;
+}
+
+export async function listSaccoStaff(institutionId: string) {
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/staff`,
+    {
+      headers: getAuthHeaders(),
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to fetch SACCO staff");
+  return data as {
+    institution?: { id?: string; name?: string; code?: string };
+    total?: number;
+    members?: Array<{
+      id: string;
+      status?: string;
+      role?: string;
+      permissions?: Record<string, unknown> | null;
+      createdAt?: string | null;
+      user?: {
+        email?: string | null;
+        phone?: string | null;
+        profile?: { firstName?: string | null; lastName?: string | null } | null;
+      } | null;
+    }>;
+  };
+}
+
+export async function updateSaccoWithdrawalSettings(
+  institutionId: string,
+  payload: UpdateSaccoWithdrawalSettingsPayload,
+) {
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/withdrawal-settings`,
+    {
+      method: "PATCH",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload),
+    },
+  );
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data?.message || "Failed to update withdrawal settings");
+  }
+  return data as {
+    institution?: { id?: string; name?: string; code?: string };
+    withdrawals?: {
+      enabled?: boolean;
+      savings?: boolean;
+      shares?: boolean;
+      minimumAmount?: number;
+      maximumAmount?: number;
+    };
+  };
+}
+
+export async function listPartnerTeamMembers(partnerId: string) {
+  const response = await authFetch(`${API_CONFIG.baseUrl}/partner/${partnerId}/members`, {
+    headers: getAuthHeaders(),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to fetch partner staff");
+  return data as {
+    members?: Array<{
+      id: string;
+      email?: string;
+      firstName?: string | null;
+      lastName?: string | null;
+      role?: string;
+      status?: string;
+      canManageMembers?: boolean;
+      canManageApiKeys?: boolean;
+      canViewTransactions?: boolean;
+      canViewAnalytics?: boolean;
+      canConfigureTariffs?: boolean;
+      createdAt?: string;
+      updatedAt?: string;
+    }>;
+    totalMembers?: number;
+    activeMembers?: number;
+    pendingInvitations?: number;
+  };
+}
+
+export async function createPartnerStaff(
+  partnerId: string,
+  payload: CreatePartnerStaffPayload,
+) {
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner/${partnerId}/members/add-direct`,
+    {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({
+        partnerId,
+        email: payload.email,
+        password: payload.password,
+        firstName: payload.firstName,
+        lastName: payload.lastName,
+        phoneNumber: payload.phoneNumber,
+        role: payload.role,
+      }),
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to create partner staff");
+  return data;
+}
+
 export async function createSaccoUser(institutionId: string, payload: CreateSaccoUserPayload) {
-  const response = await fetch(
+  const response = await authFetch(
     `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/users`,
     {
       method: "POST",
@@ -122,7 +304,7 @@ export async function createSaccoUser(institutionId: string, payload: CreateSacc
 }
 
 export async function listSaccoUsers(institutionId: string) {
-  const response = await fetch(
+  const response = await authFetch(
     `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/users`,
     {
       headers: getAuthHeaders(),
@@ -150,7 +332,7 @@ export async function listSaccoUsers(institutionId: string) {
 }
 
 export async function listSaccoTransactions(institutionId: string) {
-  const response = await fetch(
+  const response = await authFetch(
     `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/transactions`,
     {
       headers: getAuthHeaders(),
@@ -190,7 +372,7 @@ export async function uploadSaccoUsersExcel(institutionId: string, file: File) {
   const formData = new FormData();
   formData.append("file", file);
 
-  const response = await fetch(
+  const response = await authFetch(
     `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/users/upload`,
     {
       method: "POST",
@@ -222,6 +404,43 @@ export type PartnerLiquidation = {
   requestedAt?: string;
   updatedAt?: string;
   notes?: string;
+  payoutMethod?: string;
+  payoutDetails?: Record<string, unknown>;
+  processingStatus?: string;
+  approvalStatus?: string;
+};
+
+function deriveLiquidationDisplayStatus(row: Record<string, unknown>): string {
+  const raw = String(row.status ?? "PENDING").toUpperCase();
+  const metadata =
+    row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)
+      ? (row.metadata as Record<string, unknown>)
+      : {};
+  const processing = String(metadata.liquidationProcessingStatus || "").toUpperCase();
+  const approval = String(metadata.liquidationApprovalStatus || "").toUpperCase();
+  if (approval === "APPROVED" && raw === "PENDING") return "APPROVED";
+  if (processing === "SUCCESS_AUTO_PROCESSED") return "SUCCESS (Auto-Processed)";
+  if (processing === "SUCCESS_MANUAL_PROCESSING_REQUIRED")
+    return "SUCCESS (Manual Processing Required)";
+  return raw;
+}
+
+export type LiquidationMethod = "RUKAPAY_WALLET" | "MOBILE_MONEY" | "BANK_TRANSFER";
+
+export type LiquidationRequestPayload = {
+  walletId: string;
+  amount: number;
+  currency?: string;
+  reason?: string;
+  manualSettlementNote?: string;
+  payoutMethod: LiquidationMethod;
+  destinationWalletId?: string;
+  mobileMoneyPhone?: string;
+  mobileMoneyNetwork?: string;
+  mobileMoneyRecipientName?: string;
+  bankName?: string;
+  bankAccountNumber?: string;
+  bankAccountName?: string;
 };
 
 type SaccoWithWallets = {
@@ -280,17 +499,11 @@ function pickSettlementWalletId(institution: SaccoWithWallets): string | undefin
  * Request wallet liquidation (rdbs_core: POST /transactions/liquidation/request).
  * Creates a PENDING LIQUIDATION transaction; admin approves before debit.
  */
-export async function requestWalletLiquidation(payload: {
-  walletId: string;
-  amount: number;
-  currency?: string;
-  reason?: string;
-  manualSettlementNote?: string;
-}) {
+export async function requestWalletLiquidation(payload: LiquidationRequestPayload) {
   const paths = ["/transactions/liquidation/request", "/api/v1/transactions/liquidation/request"];
   let lastMessage = "Could not submit liquidation request";
   for (const path of paths) {
-    const response = await fetch(`${API_CONFIG.baseUrl}${path}`, {
+    const response = await authFetch(`${API_CONFIG.baseUrl}${path}`, {
       method: "POST",
       headers: getAuthHeaders(),
       body: JSON.stringify(payload),
@@ -328,7 +541,7 @@ export async function listPartnerLiquidations(): Promise<PartnerLiquidation[]> {
       const institutionId = inst.id ? String(inst.id) : "";
       if (!institutionId) return [] as PartnerLiquidation[];
 
-      const response = await fetch(
+      const response = await authFetch(
         `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/transactions`,
         {
           headers: getAuthHeaders(),
@@ -362,12 +575,45 @@ export async function listPartnerLiquidations(): Promise<PartnerLiquidation[]> {
           institutionId,
           saccoCode: code || undefined,
           saccoName: name || undefined,
-          status: row.status != null ? String(row.status) : undefined,
+          status: deriveLiquidationDisplayStatus(row),
           amount: Number.isFinite(amount) ? amount : undefined,
           currency: row.currency != null ? String(row.currency) : undefined,
           requestedAt: row.createdAt != null ? String(row.createdAt) : undefined,
           updatedAt: row.createdAt != null ? String(row.createdAt) : undefined,
           notes: row.description != null ? String(row.description) : undefined,
+          payoutMethod:
+            row.metadata &&
+            typeof row.metadata === "object" &&
+            !Array.isArray(row.metadata)
+              ? String((row.metadata as Record<string, unknown>).payoutMethod || "")
+              : undefined,
+          payoutDetails:
+            row.metadata &&
+            typeof row.metadata === "object" &&
+            !Array.isArray(row.metadata)
+              ? (((row.metadata as Record<string, unknown>).payoutDetails as Record<
+                  string,
+                  unknown
+                >) || undefined)
+              : undefined,
+          processingStatus:
+            row.metadata &&
+            typeof row.metadata === "object" &&
+            !Array.isArray(row.metadata)
+              ? String(
+                  (row.metadata as Record<string, unknown>)
+                    .liquidationProcessingStatus || "",
+                ) || undefined
+              : undefined,
+          approvalStatus:
+            row.metadata &&
+            typeof row.metadata === "object" &&
+            !Array.isArray(row.metadata)
+              ? String(
+                  (row.metadata as Record<string, unknown>).liquidationApprovalStatus ||
+                    "",
+                ) || undefined
+              : undefined,
         });
       }
       return out;
@@ -394,6 +640,14 @@ export async function createPartnerLiquidationRequest(payload: {
   currency?: string;
   reason?: string;
   manualSettlementNote?: string;
+  payoutMethod: LiquidationMethod;
+  destinationWalletId?: string;
+  mobileMoneyPhone?: string;
+  mobileMoneyNetwork?: string;
+  mobileMoneyRecipientName?: string;
+  bankName?: string;
+  bankAccountNumber?: string;
+  bankAccountName?: string;
 }) {
   const institutions = (await listPartnerSaccos()) as SaccoWithWallets[];
   const inst = institutions.find((i) => String(i.id) === String(payload.institutionId));
@@ -411,12 +665,81 @@ export async function createPartnerLiquidationRequest(payload: {
     currency: payload.currency || "UGX",
     reason: payload.reason,
     manualSettlementNote: payload.manualSettlementNote,
+    payoutMethod: payload.payoutMethod,
+    destinationWalletId: payload.destinationWalletId,
+    mobileMoneyPhone: payload.mobileMoneyPhone,
+    mobileMoneyNetwork: payload.mobileMoneyNetwork,
+    mobileMoneyRecipientName: payload.mobileMoneyRecipientName,
+    bankName: payload.bankName,
+    bankAccountNumber: payload.bankAccountNumber,
+    bankAccountName: payload.bankAccountName,
   });
+}
+
+export async function cancelLiquidationRequest(transactionId: string, reason?: string) {
+  const paths = [
+    `/transactions/liquidation/${transactionId}/cancel`,
+    `/api/v1/transactions/liquidation/${transactionId}/cancel`,
+  ];
+  let lastMessage = "Could not cancel liquidation request";
+  for (const path of paths) {
+    const response = await authFetch(`${API_CONFIG.baseUrl}${path}`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ reason }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 404) continue;
+    if (!response.ok) {
+      lastMessage =
+        (typeof data?.message === "string" && data.message) ||
+        (Array.isArray(data?.message) && data.message[0]) ||
+        lastMessage;
+      throw new Error(lastMessage);
+    }
+    return data as { success?: boolean; message?: string; status?: string };
+  }
+  throw new Error(lastMessage);
+}
+
+type ValidatePartnerDestinationPayload = {
+  transactionType: "WALLET_TO_BANK" | "WALLET_TO_MNO";
+  accountNumber?: string;
+  bankCode?: string;
+  phoneNumber?: string;
+  network?: string;
+};
+
+type ValidatePartnerDestinationResponse = {
+  success?: boolean;
+  message?: string;
+  beneficiary?: { name?: string; isValid?: boolean };
+  validationResult?: { data?: { name?: string } };
+  error?: string;
+};
+
+export async function validatePartnerDestination(
+  payload: ValidatePartnerDestinationPayload,
+): Promise<ValidatePartnerDestinationResponse> {
+  const response = await authFetch(`${API_CONFIG.baseUrl}/transactions/validate`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message =
+      (typeof data?.message === "string" && data.message) ||
+      (Array.isArray(data?.message) && data.message[0]) ||
+      "Destination validation failed";
+    throw new Error(message);
+  }
+  return data as ValidatePartnerDestinationResponse;
 }
 
 export async function downloadSaccoUsersTemplate() {
   const token = localStorage.getItem(APP_CONFIG.storageKeys.accessToken);
-  const response = await fetch(getSaccoUsersTemplateUrl(), {
+  const response = await authFetch(getSaccoUsersTemplateUrl(), {
     headers: {
       Authorization: `Bearer ${token || ""}`,
     },

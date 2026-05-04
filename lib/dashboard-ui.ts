@@ -14,9 +14,9 @@ export const ipc = {
   metricIcon:
     "flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200/80 bg-slate-50 text-slate-600",
   btnPrimary:
-    "inline-flex items-center justify-center rounded-lg bg-[var(--rukapay-primary)] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--rukapay-primary-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#08163d]/35 disabled:pointer-events-none disabled:opacity-50",
+    "inline-flex cursor-pointer items-center justify-center rounded-lg bg-[var(--rukapay-primary)] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[var(--rukapay-primary-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#08163d]/35 disabled:pointer-events-none disabled:opacity-50",
   btnSecondary:
-    "inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 shadow-sm transition hover:border-slate-400 hover:bg-slate-50",
+    "inline-flex cursor-pointer items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 shadow-sm transition hover:border-slate-400 hover:bg-slate-50",
   /** Modal shell — use with inner sections for header / body / footer */
   modalOverlay:
     "fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 p-4 backdrop-blur-sm sm:p-6",

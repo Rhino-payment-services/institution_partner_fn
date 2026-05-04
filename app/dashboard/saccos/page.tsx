@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { createPartnerSacco, listPartnerSaccos } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 import { ipc } from "@/lib/dashboard-ui";
 
 type SaccoItem = {
@@ -17,10 +18,26 @@ type SaccoItem = {
 };
 
 export default function SaccosPage() {
+  const { user } = useAuth();
+  const canCreateSacco = Boolean(
+    user?.scope !== "INSTITUTION" &&
+      (user?.permissions?.canManageMembers ||
+        user?.permissions?.canManageInstitution ||
+        user?.permissions?.role === "OWNER"),
+  );
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [saccoCode, setSaccoCode] = useState("");
   const [saccoName, setSaccoName] = useState("");
   const [externalOrgId, setExternalOrgId] = useState("");
+  const [createInitialStaff, setCreateInitialStaff] = useState(false);
+  const [initialStaffFirstName, setInitialStaffFirstName] = useState("");
+  const [initialStaffLastName, setInitialStaffLastName] = useState("");
+  const [initialStaffEmail, setInitialStaffEmail] = useState("");
+  const [initialStaffPhone, setInitialStaffPhone] = useState("");
+  const [initialStaffPassword, setInitialStaffPassword] = useState("");
+  const [initialStaffRole, setInitialStaffRole] = useState<"OWNER" | "ADMIN" | "OPERATOR" | "VIEWER">(
+    "OWNER",
+  );
   const [saccos, setSaccos] = useState<SaccoItem[]>([]);
   const [error, setError] = useState("");
   const [feedback, setFeedback] = useState("");
@@ -41,18 +58,45 @@ export default function SaccosPage() {
 
   async function handleCreateSacco(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (!canCreateSacco) {
+      setError("Your role does not allow creating SACCOs.");
+      return;
+    }
     setFeedback("");
     setError("");
+    const trimmedExternalOrgId = externalOrgId.trim();
+    if (!trimmedExternalOrgId) {
+      setError("External Org ID is required.");
+      return;
+    }
     try {
       await createPartnerSacco({
         code: saccoCode.trim().toUpperCase(),
         name: saccoName.trim(),
-        externalOrgId: externalOrgId.trim() || undefined,
+        externalOrgId: trimmedExternalOrgId,
+        ...(createInitialStaff
+          ? {
+              createInitialStaffLogin: true,
+              initialStaffFirstName: initialStaffFirstName.trim() || undefined,
+              initialStaffLastName: initialStaffLastName.trim() || undefined,
+              initialStaffEmail: initialStaffEmail.trim() || undefined,
+              initialStaffPhone: initialStaffPhone.trim() || undefined,
+              initialStaffPassword: initialStaffPassword,
+              initialStaffRole,
+            }
+          : {}),
       });
       setFeedback("SACCO created successfully.");
       setSaccoCode("");
       setSaccoName("");
       setExternalOrgId("");
+      setCreateInitialStaff(false);
+      setInitialStaffFirstName("");
+      setInitialStaffLastName("");
+      setInitialStaffEmail("");
+      setInitialStaffPhone("");
+      setInitialStaffPassword("");
+      setInitialStaffRole("OWNER");
       setIsCreateModalOpen(false);
       await loadSaccos();
     } catch (err) {
@@ -79,12 +123,13 @@ export default function SaccosPage() {
           </div>
           <button
             type="button"
+            disabled={!canCreateSacco}
             onClick={() => {
               setError("");
               setFeedback("");
               setIsCreateModalOpen(true);
             }}
-            className={ipc.btnPrimary}
+            className={`${ipc.btnPrimary} disabled:cursor-not-allowed disabled:opacity-50`}
           >
             Create SACCO
           </button>
@@ -161,7 +206,7 @@ export default function SaccosPage() {
                   </h3>
                   <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
                     Register a new savings and credit co-operative linked to your partner account. All fields
-                    except external ID are required.
+                    are required.
                   </p>
                 </div>
                 <button
@@ -214,7 +259,7 @@ export default function SaccosPage() {
                 </div>
                 <div>
                   <label htmlFor="external-org" className={ipc.formLabel}>
-                    External org ID <span className="font-normal normal-case text-slate-400">(optional)</span>
+                    External org ID
                   </label>
                   <input
                     id="external-org"
@@ -222,8 +267,70 @@ export default function SaccosPage() {
                     onChange={(e) => setExternalOrgId(e.target.value)}
                     placeholder="Link to your core banking or ERP reference"
                     className={`${ipc.input} mt-2`}
+                    required
                   />
                 </div>
+                <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={createInitialStaff}
+                    onChange={(e) => setCreateInitialStaff(e.target.checked)}
+                  />
+                  Create initial SACCO staff login
+                </label>
+                {createInitialStaff && (
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <input
+                      value={initialStaffFirstName}
+                      onChange={(e) => setInitialStaffFirstName(e.target.value)}
+                      placeholder="Staff first name"
+                      className={ipc.input}
+                    />
+                    <input
+                      value={initialStaffLastName}
+                      onChange={(e) => setInitialStaffLastName(e.target.value)}
+                      placeholder="Staff last name"
+                      className={ipc.input}
+                    />
+                    <input
+                      value={initialStaffEmail}
+                      onChange={(e) => setInitialStaffEmail(e.target.value)}
+                      placeholder="staff@sacco.com"
+                      className={ipc.input}
+                      type="email"
+                      required={createInitialStaff}
+                    />
+                    <input
+                      value={initialStaffPhone}
+                      onChange={(e) => setInitialStaffPhone(e.target.value)}
+                      placeholder="+2567..."
+                      className={ipc.input}
+                      required={createInitialStaff}
+                    />
+                    <input
+                      value={initialStaffPassword}
+                      onChange={(e) => setInitialStaffPassword(e.target.value)}
+                      placeholder="Temporary password"
+                      className={ipc.input}
+                      type="password"
+                      required={createInitialStaff}
+                    />
+                    <select
+                      value={initialStaffRole}
+                      onChange={(e) =>
+                        setInitialStaffRole(
+                          e.target.value as "OWNER" | "ADMIN" | "OPERATOR" | "VIEWER",
+                        )
+                      }
+                      className={ipc.input}
+                    >
+                      <option value="OWNER">OWNER</option>
+                      <option value="ADMIN">ADMIN</option>
+                      <option value="OPERATOR">OPERATOR</option>
+                      <option value="VIEWER">VIEWER</option>
+                    </select>
+                  </div>
+                )}
               </div>
               <div className={ipc.modalFooter}>
                 <button

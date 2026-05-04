@@ -20,9 +20,25 @@ import { useAuth } from "@/lib/auth-context";
 const navItems = [
   { label: "Overview", href: "/dashboard", Icon: IconOverview },
   { label: "SACCOs", href: "/dashboard/saccos", Icon: IconSaccos },
-  { label: "Members", href: "/dashboard/members", Icon: IconMembers },
-  { label: "Liquidation", href: "/dashboard/liquidation", Icon: IconLiquidation },
-  { label: "Insights", href: "/dashboard/insights", Icon: IconReports },
+  {
+    label: "Members",
+    href: "/dashboard/members",
+    Icon: IconMembers,
+    permission: "canManageMembers",
+  },
+  {
+    label: "Staff",
+    href: "/dashboard/staff",
+    Icon: IconMembers,
+    permission: "canManageMembers",
+  },
+  {
+    label: "Liquidation",
+    href: "/dashboard/liquidation",
+    Icon: IconLiquidation,
+    permission: "canRequestLiquidation",
+  },
+  { label: "Insights", href: "/dashboard/insights", Icon: IconReports, permission: "canViewTransactions" },
 ] as const;
 
 const SIDEBAR_EXPANDED_PX = 288;
@@ -77,12 +93,26 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const displayName = user?.email || user?.phone || "Partner User";
   const initials = useMemo(() => getInitials(displayName), [displayName]);
+  const displayedNavItems = useMemo(() => {
+    const perms = user?.permissions || {};
+    return navItems.filter((item) => {
+      if (!("permission" in item) || !item.permission) return true;
+      return Boolean((perms as Record<string, unknown>)[item.permission]);
+    });
+  }, [user?.permissions]);
 
   useEffect(() => {
     if (isHydrated && !isAuthenticated) {
       router.replace("/");
     }
   }, [isHydrated, isAuthenticated, router]);
+
+  useEffect(() => {
+    if (!isHydrated || !isAuthenticated) return;
+    if (user?.scope === "INSTITUTION") {
+      router.replace("/sacco");
+    }
+  }, [isHydrated, isAuthenticated, user?.scope, router]);
 
   useEffect(() => {
     if (!profileMenuOpen) return;
@@ -201,7 +231,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </p>
         )}
         <nav className="flex flex-col gap-1" aria-label="Sidebar">
-          {navItems.map((item) => {
+          {displayedNavItems.map((item) => {
             const active = isSidebarNavActive(pathname, item.href);
             const Icon = item.Icon;
             return (
@@ -298,7 +328,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         className="sticky top-0 z-50 flex gap-1 border-b border-slate-200/80 bg-white/95 px-2 py-2 shadow-sm shadow-slate-900/[0.04] backdrop-blur-md lg:hidden"
         aria-label="Main"
       >
-        {navItems.map((item) => {
+        {displayedNavItems.map((item) => {
           const active = isSidebarNavActive(pathname, item.href);
           const Icon = item.Icon;
           return (
