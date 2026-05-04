@@ -175,6 +175,7 @@ export default function SaccoTransactionsPage() {
             </tbody>
           </table>
         </div>
+        
       </section>
     </div>
   );
