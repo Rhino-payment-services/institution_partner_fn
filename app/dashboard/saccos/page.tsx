@@ -34,7 +34,6 @@ export default function SaccosPage() {
   const [initialStaffLastName, setInitialStaffLastName] = useState("");
   const [initialStaffEmail, setInitialStaffEmail] = useState("");
   const [initialStaffPhone, setInitialStaffPhone] = useState("");
-  const [initialStaffPassword, setInitialStaffPassword] = useState("");
   const [initialStaffRole, setInitialStaffRole] = useState<"OWNER" | "ADMIN" | "OPERATOR" | "VIEWER">(
     "OWNER",
   );
@@ -81,12 +80,11 @@ export default function SaccosPage() {
               initialStaffLastName: initialStaffLastName.trim() || undefined,
               initialStaffEmail: initialStaffEmail.trim() || undefined,
               initialStaffPhone: initialStaffPhone.trim() || undefined,
-              initialStaffPassword: initialStaffPassword,
               initialStaffRole,
             }
           : {}),
       });
-      setFeedback("SACCO created successfully.");
+      setFeedback("SACCO created successfully. If you added initial staff, an invitation email was sent.");
       setSaccoCode("");
       setSaccoName("");
       setExternalOrgId("");
@@ -95,7 +93,6 @@ export default function SaccosPage() {
       setInitialStaffLastName("");
       setInitialStaffEmail("");
       setInitialStaffPhone("");
-      setInitialStaffPassword("");
       setInitialStaffRole("OWNER");
       setIsCreateModalOpen(false);
       await loadSaccos();
@@ -276,7 +273,7 @@ export default function SaccosPage() {
                     checked={createInitialStaff}
                     onChange={(e) => setCreateInitialStaff(e.target.checked)}
                   />
-                  Create initial SACCO staff login
+                  Create initial SACCO staff login (invitation email — no password here)
                 </label>
                 {createInitialStaff && (
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -305,14 +302,6 @@ export default function SaccosPage() {
                       onChange={(e) => setInitialStaffPhone(e.target.value)}
                       placeholder="+2567..."
                       className={ipc.input}
-                      required={createInitialStaff}
-                    />
-                    <input
-                      value={initialStaffPassword}
-                      onChange={(e) => setInitialStaffPassword(e.target.value)}
-                      placeholder="Temporary password"
-                      className={ipc.input}
-                      type="password"
                       required={createInitialStaff}
                     />
                     <select
