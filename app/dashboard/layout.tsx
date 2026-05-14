@@ -303,6 +303,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               className="absolute bottom-full right-0 z-50 mb-2 min-w-[160px] overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg shadow-slate-900/10"
               role="menu"
             >
+              <Link
+                href="/account/password"
+                role="menuitem"
+                className="block w-full px-4 py-2.5 text-left text-sm font-medium text-slate-800 transition hover:bg-slate-50"
+                onClick={() => setProfileMenuOpen(false)}
+              >
+                Update password
+              </Link>
               <button
                 type="button"
                 role="menuitem"
@@ -377,16 +385,21 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   </span>
                 </h1>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  logout();
-                  router.replace("/");
-                }}
-                className={`${ipc.btnSecondary} lg:hidden`}
-              >
-                Logout
-              </button>
+              <div className="flex shrink-0 items-center gap-2 lg:hidden">
+                <Link href="/account/password" className={ipc.btnSecondary}>
+                  Password
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => {
+                    logout();
+                    router.replace("/");
+                  }}
+                  className={ipc.btnSecondary}
+                >
+                  Logout
+                </button>
+              </div>
             </div>
           </header>
 

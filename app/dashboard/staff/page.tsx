@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { createPartnerStaff, listPartnerTeamMembers } from "@/lib/api";
+import { createPartnerStaff, listPartnerTeamMembers, resendPartnerTeamInvitation } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { ipc } from "@/lib/dashboard-ui";
 
 type StaffItem = {
   id: string;
   status?: string;
+  accountStatus?: string;
   role?: string;
   email?: string;
   firstName?: string | null;
@@ -31,9 +32,10 @@ export default function StaffPage() {
   const [staffPhoneNumber, setStaffPhoneNumber] = useState("");
   const [staffFirstName, setStaffFirstName] = useState("");
   const [staffLastName, setStaffLastName] = useState("");
-  const [staffPassword, setStaffPassword] = useState("");
   const [staffRole, setStaffRole] = useState<"OWNER" | "ADMIN" | "DEVELOPER" | "MEMBER" | "VIEWER">("MEMBER");
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [resendMemberId, setResendMemberId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [feedback, setFeedback] = useState("");
 
@@ -52,6 +54,21 @@ export default function StaffPage() {
     }
   }
 
+  async function handleResend(memberId: string) {
+    if (!partnerId) return;
+    setResendMemberId(memberId);
+    setError("");
+    setFeedback("");
+    try {
+      await resendPartnerTeamInvitation(partnerId, memberId);
+      setFeedback("Invitation email sent successfully.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to resend invitation");
+    } finally {
+      setResendMemberId(null);
+    }
+  }
+
   async function handleCreateStaff(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!partnerId) {
@@ -60,26 +77,27 @@ export default function StaffPage() {
     }
     setError("");
     setFeedback("");
+    setIsSubmitting(true);
     try {
       await createPartnerStaff(partnerId, {
         firstName: staffFirstName.trim() || undefined,
         lastName: staffLastName.trim() || undefined,
         email: staffEmail.trim(),
         phoneNumber: staffPhoneNumber.trim() || undefined,
-        password: staffPassword,
         role: staffRole,
       });
-      setFeedback("Partner staff login created successfully.");
+      setFeedback("Invitation email sent successfully.");
       setStaffEmail("");
       setStaffPhoneNumber("");
       setStaffFirstName("");
       setStaffLastName("");
-      setStaffPassword("");
       setStaffRole("MEMBER");
       setIsCreateModalOpen(false);
       await loadPartnerStaff(partnerId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create partner staff login");
+    } finally {
+      setIsSubmitting(false);
     }
   }
 
@@ -123,7 +141,7 @@ export default function StaffPage() {
           <div>
             <h3 className="text-lg font-semibold tracking-tight text-slate-900">Create staff login user</h3>
             <p className="mt-1 text-sm text-slate-600">
-              Add a partner dashboard staff account and assign role access.
+              Add a partner dashboard staff account. We email them a secure link to set their own password.
             </p>
           </div>
           <button
@@ -147,13 +165,14 @@ export default function StaffPage() {
                 <th className={ipc.th}>Email</th>
                 <th className={ipc.th}>Phone</th>
                 <th className={ipc.th}>Role</th>
-                <th className={ipc.th}>Status</th>
+                <th className={ipc.th}>Account</th>
+                <th className={ipc.th}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {staffRows.length === 0 ? (
                 <tr>
-                  <td className={`${ipc.td} text-slate-600`} colSpan={5}>
+                  <td className={`${ipc.td} text-slate-600`} colSpan={6}>
                     No partner staff logins yet.
                   </td>
                 </tr>
@@ -161,13 +180,44 @@ export default function StaffPage() {
                 staffRows.map((s) => {
                   const first = s.firstName || "";
                   const last = s.lastName || "";
+                  const badge =
+                    s.accountStatus === "PENDING_INVITATION" || String(s.status) === "PENDING"
+                      ? "Pending Invitation"
+                      : "Active";
+                  const badgeClass =
+                    badge === "Active"
+                      ? "bg-emerald-50 text-emerald-800 ring-emerald-600/20"
+                      : "bg-amber-50 text-amber-900 ring-amber-600/20";
+                  const showResend =
+                    canManagePartnerStaff &&
+                    (s.accountStatus === "PENDING_INVITATION" || String(s.status) === "PENDING");
                   return (
                     <tr key={s.id} className={ipc.tbodyRow}>
                       <td className={ipc.td}>{`${first} ${last}`.trim() || "—"}</td>
                       <td className={ipc.td}>{s.email || "—"}</td>
                       <td className={ipc.td}>—</td>
                       <td className={ipc.td}>{s.role || "VIEWER"}</td>
-                      <td className={ipc.td}>{s.status || "ACTIVE"}</td>
+                      <td className={ipc.td}>
+                        <span
+                          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${badgeClass}`}
+                        >
+                          {badge}
+                        </span>
+                      </td>
+                      <td className={ipc.td}>
+                        {showResend ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleResend(s.id)}
+                            disabled={resendMemberId === s.id}
+                            className="text-sm font-medium text-[var(--rukapay-primary)] hover:underline disabled:opacity-50"
+                          >
+                            {resendMemberId === s.id ? "Sending…" : "Resend invitation"}
+                          </button>
+                        ) : (
+                          <span className="text-xs text-slate-400">—</span>
+                        )}
+                      </td>
                     </tr>
                   );
                 })
@@ -196,7 +246,9 @@ export default function StaffPage() {
                   <h3 id="create-staff-title" className="text-lg font-semibold tracking-tight text-slate-900">
                     Create staff login
                   </h3>
-                  <p className="mt-1.5 text-sm leading-relaxed text-slate-600">Partner dashboard staff account</p>
+                  <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
+                    We will send a one-time invitation link to set a password.
+                  </p>
                 </div>
                 <button
                   type="button"
@@ -237,14 +289,6 @@ export default function StaffPage() {
                   placeholder="+2567..."
                   className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
                 />
-                <input
-                  value={staffPassword}
-                  onChange={(e) => setStaffPassword(e.target.value)}
-                  placeholder="Temporary password"
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
-                  required
-                  type="password"
-                />
                 <select
                   value={staffRole}
                   onChange={(e) => setStaffRole(e.target.value as "OWNER" | "ADMIN" | "DEVELOPER" | "MEMBER" | "VIEWER")}
@@ -267,10 +311,10 @@ export default function StaffPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={!partnerId}
+                  disabled={!partnerId || isSubmitting}
                   className={`${ipc.btnPrimary} w-full rounded-xl px-6 sm:w-auto disabled:cursor-not-allowed disabled:opacity-50`}
                 >
-                  Create staff login
+                  {isSubmitting ? "Sending invitation…" : "Send invitation"}
                 </button>
               </div>
             </form>
