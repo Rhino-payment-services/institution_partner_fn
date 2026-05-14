@@ -56,6 +56,8 @@ type CreateSaccoPayload = {
   code: string;
   name: string;
   externalOrgId?: string;
+  /** Letters and digits only; optional */
+  licenseNumber?: string;
   createInitialStaffLogin?: boolean;
   initialStaffEmail?: string;
   initialStaffPhone?: string;
@@ -138,6 +140,26 @@ export async function listPartnerSaccos() {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data?.message || "Failed to fetch SACCOs");
   return data as Array<Record<string, unknown>>;
+}
+
+export async function changePartnerPassword(body: {
+  currentPassword: string;
+  newPassword: string;
+}) {
+  const response = await authFetch(`${API_CONFIG.baseUrl}/partner-auth/change-password`, {
+    method: "PATCH",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(
+      typeof data?.message === "string"
+        ? data.message
+        : data?.message?.message || "Failed to change password",
+    );
+  }
+  return data as { success?: boolean; message?: string };
 }
 
 export async function createPartnerSacco(payload: CreateSaccoPayload) {
