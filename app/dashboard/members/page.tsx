@@ -8,6 +8,7 @@ import {
   downloadSaccoUsersTemplate,
   listPartnerSaccos,
   listSaccoStaff,
+  resendSaccoStaffInvitation,
   updateSaccoWithdrawalSettings,
   uploadSaccoUsersExcel,
 } from "@/lib/api";
@@ -46,6 +47,7 @@ type PreviewRow = {
 type StaffItem = {
   id: string;
   status?: string;
+  accountStatus?: string;
   role?: string;
   permissions?: {
     canViewTransactions?: boolean;
@@ -65,7 +67,6 @@ type StaffFormErrors = {
   lastName?: string;
   email?: string;
   phone?: string;
-  password?: string;
 };
 
 export default function MembersPage() {
@@ -101,9 +102,10 @@ export default function MembersPage() {
   const [staffPhone, setStaffPhone] = useState("");
   const [staffFirstName, setStaffFirstName] = useState("");
   const [staffLastName, setStaffLastName] = useState("");
-  const [staffPassword, setStaffPassword] = useState("");
   const [staffRole, setStaffRole] = useState<"OWNER" | "ADMIN" | "OPERATOR" | "VIEWER">("VIEWER");
   const [staffFormErrors, setStaffFormErrors] = useState<StaffFormErrors>({});
+  const [isCreatingStaff, setIsCreatingStaff] = useState(false);
+  const [resendStaffId, setResendStaffId] = useState<string | null>(null);
   const [withdrawalsEnabled, setWithdrawalsEnabled] = useState(true);
   const [savingsWithdrawEnabled, setSavingsWithdrawEnabled] = useState(true);
   const [sharesWithdrawEnabled, setSharesWithdrawEnabled] = useState(true);
@@ -200,6 +202,11 @@ export default function MembersPage() {
       setError("Please enter a valid phone number before creating the SACCO member.");
       return;
     }
+    const accountNoTrimmed = memberAccountNo.trim();
+    if (!accountNoTrimmed) {
+      setError("SACCO account number is required for each member.");
+      return;
+    }
 
     setIsCreatingMember(true);
     try {
@@ -209,7 +216,7 @@ export default function MembersPage() {
         phone: normalizedPhone,
         nationalId: memberNationalId.trim(),
         email: memberEmail.trim() || undefined,
-        accountNo: memberAccountNo.trim() || undefined,
+        accountNo: accountNoTrimmed,
         clientId: memberClientId.trim() || undefined,
       });
       setFeedback("SACCO user created successfully.");
@@ -229,6 +236,21 @@ export default function MembersPage() {
     }
   }
 
+  async function handleResendStaffInvitation(memberId: string) {
+    if (!selectedSaccoId) return;
+    setError("");
+    setFeedback("");
+    setResendStaffId(memberId);
+    try {
+      await resendSaccoStaffInvitation(selectedSaccoId, memberId);
+      setFeedback("Invitation email sent successfully.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to resend invitation");
+    } finally {
+      setResendStaffId(null);
+    }
+  }
+
   async function handleCreateStaff(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!selectedSaccoId) {
@@ -242,7 +264,6 @@ export default function MembersPage() {
     const lastName = staffLastName.trim();
     const email = staffEmail.trim();
     const phone = staffPhone.trim();
-    const password = staffPassword;
 
     if (!firstName) nextErrors.firstName = "First name is required";
     if (!lastName) nextErrors.lastName = "Last name is required";
@@ -256,38 +277,34 @@ export default function MembersPage() {
     } else if (phone.replace(/\D/g, "").length < 9) {
       nextErrors.phone = "Enter a valid phone number";
     }
-    if (!password) {
-      nextErrors.password = "Password is required";
-    } else if (password.length < 8) {
-      nextErrors.password = "Password must be at least 8 characters";
-    }
 
     if (Object.keys(nextErrors).length > 0) {
       setStaffFormErrors(nextErrors);
       return;
     }
     setStaffFormErrors({});
+    setIsCreatingStaff(true);
     try {
       await createSaccoStaff(selectedSaccoId, {
         firstName,
         lastName,
         email,
         phone,
-        password,
         role: staffRole,
       });
-      setFeedback("SACCO staff login created successfully.");
+      setFeedback("Invitation email sent successfully.");
       setStaffEmail("");
       setStaffPhone("");
       setStaffFirstName("");
       setStaffLastName("");
-      setStaffPassword("");
       setStaffRole("VIEWER");
       setStaffFormErrors({});
       setIsCreateStaffModalOpen(false);
       await loadSaccoStaff(selectedSaccoId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create SACCO staff login");
+    } finally {
+      setIsCreatingStaff(false);
     }
   }
 
@@ -423,6 +440,7 @@ export default function MembersPage() {
           if (!row.lastName) missingFields.push("lastName");
           if (!row.phone) missingFields.push("phone");
           if (!row.nationalId) missingFields.push("nationalId");
+          if (!row.accountNo) missingFields.push("accountNo");
           return missingFields.length > 0
             ? `Row ${index + 2}: missing ${missingFields.join(", ")}`
             : null;
@@ -628,13 +646,14 @@ export default function MembersPage() {
                 <th className={ipc.th}>Email</th>
                 <th className={ipc.th}>Phone</th>
                 <th className={ipc.th}>Role</th>
-                <th className={ipc.th}>Status</th>
+                <th className={ipc.th}>Account</th>
+                <th className={ipc.th}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {staffRows.length === 0 ? (
                 <tr>
-                  <td className={`${ipc.td} text-slate-600`} colSpan={5}>
+                  <td className={`${ipc.td} text-slate-600`} colSpan={6}>
                     No SACCO staff logins yet.
                   </td>
                 </tr>
@@ -642,13 +661,44 @@ export default function MembersPage() {
                 staffRows.map((s) => {
                   const first = s.user?.profile?.firstName || "";
                   const last = s.user?.profile?.lastName || "";
+                  const badge =
+                    s.accountStatus === "PENDING_INVITATION" || String(s.status) === "PENDING_INVITATION"
+                      ? "Pending Invitation"
+                      : "Active";
+                  const badgeClass =
+                    badge === "Active"
+                      ? "bg-emerald-50 text-emerald-800 ring-emerald-600/20"
+                      : "bg-amber-50 text-amber-900 ring-amber-600/20";
+                  const showResend =
+                    canManageMembers &&
+                    (s.accountStatus === "PENDING_INVITATION" || String(s.status) === "PENDING_INVITATION");
                   return (
                     <tr key={s.id} className={ipc.tbodyRow}>
                       <td className={ipc.td}>{`${first} ${last}`.trim() || "—"}</td>
                       <td className={ipc.td}>{s.user?.email || "—"}</td>
                       <td className={ipc.td}>{s.user?.phone || "—"}</td>
                       <td className={ipc.td}>{s.role || "VIEWER"}</td>
-                      <td className={ipc.td}>{s.status || "ACTIVE"}</td>
+                      <td className={ipc.td}>
+                        <span
+                          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${badgeClass}`}
+                        >
+                          {badge}
+                        </span>
+                      </td>
+                      <td className={ipc.td}>
+                        {showResend ? (
+                          <button
+                            type="button"
+                            onClick={() => void handleResendStaffInvitation(s.id)}
+                            disabled={resendStaffId === s.id}
+                            className="text-sm font-medium text-[var(--rukapay-primary)] hover:underline disabled:opacity-50"
+                          >
+                            {resendStaffId === s.id ? "Sending…" : "Resend invitation"}
+                          </button>
+                        ) : (
+                          <span className="text-xs text-slate-400">—</span>
+                        )}
+                      </td>
                     </tr>
                   );
                 })
@@ -691,7 +741,8 @@ export default function MembersPage() {
         <article className={`${ipc.card} ${ipc.cardPad}`}>
           <h3 className="text-lg font-semibold tracking-tight text-slate-900">Bulk register SACCO customers by Excel</h3>
           <p className="mt-1 text-sm leading-relaxed text-slate-600">
-            Required columns: firstName, lastName, phone, nationalId (or nin).
+            Required columns: firstName, lastName, phone, nationalId (or nin), accountNo (SACCO account
+            number). Optional: email, clientId, status.
           </p>
           <div className="mt-4 space-y-3">
             <button type="button" onClick={handleDownloadTemplate} className={ipc.btnSecondary}>
@@ -835,15 +886,17 @@ export default function MembersPage() {
                 required
               />
               <input
+                value={memberAccountNo}
+                onChange={(e) => setMemberAccountNo(e.target.value)}
+                placeholder="SACCO account number (required)"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-[var(--rukapay-primary)] focus:ring-2 focus:ring-[#08163d]/15"
+                required
+                autoComplete="off"
+              />
+              <input
                 value={memberEmail}
                 onChange={(e) => setMemberEmail(e.target.value)}
                 placeholder="Email (optional)"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-[var(--rukapay-primary)] focus:ring-2 focus:ring-[#08163d]/15"
-              />
-              <input
-                value={memberAccountNo}
-                onChange={(e) => setMemberAccountNo(e.target.value)}
-                placeholder="Account No (optional)"
                 className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-[var(--rukapay-primary)] focus:ring-2 focus:ring-[#08163d]/15"
               />
               <input
@@ -878,9 +931,10 @@ export default function MembersPage() {
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-base font-semibold text-slate-900">Create SACCO Staff Login</h3>
-                <p className="mt-1 text-sm text-slate-600">
-                  Add staff account for {selectedSacco ? String(selectedSacco.name) : "selected SACCO"}.
-                </p>
+            <p className="mt-1 text-sm text-slate-600">
+              Add staff account for {selectedSacco ? String(selectedSacco.name) : "selected SACCO"}. An invitation
+              email will be sent so they can choose their own password.
+            </p>
               </div>
               <button
                 type="button"
@@ -953,22 +1007,6 @@ export default function MembersPage() {
                 ) : null}
               </div>
               <div>
-                <input
-                  value={staffPassword}
-                  onChange={(e) => {
-                    setStaffPassword(e.target.value);
-                    setStaffFormErrors((prev) => ({ ...prev, password: undefined }));
-                  }}
-                  placeholder="Temporary password"
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
-                  type="password"
-                  aria-invalid={Boolean(staffFormErrors.password)}
-                />
-                {staffFormErrors.password ? (
-                  <p className="mt-1 text-xs text-red-600">{staffFormErrors.password}</p>
-                ) : null}
-              </div>
-              <div>
                 <select
                   value={staffRole}
                   onChange={(e) =>
@@ -990,8 +1028,12 @@ export default function MembersPage() {
                 >
                   Cancel
                 </button>
-                <button type="submit" disabled={!selectedSaccoId} className={ipc.btnPrimary}>
-                  Create staff login
+                <button
+                  type="submit"
+                  disabled={!selectedSaccoId || isCreatingStaff}
+                  className={`${ipc.btnPrimary} disabled:cursor-not-allowed disabled:opacity-50`}
+                >
+                  {isCreatingStaff ? "Sending invitation…" : "Send invitation"}
                 </button>
               </div>
             </form>

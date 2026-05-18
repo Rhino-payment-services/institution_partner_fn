@@ -56,12 +56,13 @@ type CreateSaccoPayload = {
   code: string;
   name: string;
   externalOrgId?: string;
+  /** Letters and digits only; optional */
+  licenseNumber?: string;
   createInitialStaffLogin?: boolean;
   initialStaffEmail?: string;
   initialStaffPhone?: string;
   initialStaffFirstName?: string;
   initialStaffLastName?: string;
-  initialStaffPassword?: string;
   initialStaffRole?: "OWNER" | "ADMIN" | "OPERATOR" | "VIEWER";
 };
 
@@ -81,7 +82,6 @@ type CreateSaccoStaffPayload = {
   lastName: string;
   phone: string;
   email: string;
-  password: string;
   role?: "OWNER" | "ADMIN" | "OPERATOR" | "VIEWER";
   canViewTransactions?: boolean;
   canManageMembers?: boolean;
@@ -93,7 +93,6 @@ type PartnerStaffRole = "OWNER" | "ADMIN" | "DEVELOPER" | "MEMBER" | "VIEWER";
 
 type CreatePartnerStaffPayload = {
   email: string;
-  password: string;
   firstName?: string;
   lastName?: string;
   phoneNumber?: string;
@@ -141,6 +140,26 @@ export async function listPartnerSaccos() {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data?.message || "Failed to fetch SACCOs");
   return data as Array<Record<string, unknown>>;
+}
+
+export async function changePartnerPassword(body: {
+  currentPassword: string;
+  newPassword: string;
+}) {
+  const response = await authFetch(`${API_CONFIG.baseUrl}/partner-auth/change-password`, {
+    method: "PATCH",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(
+      typeof data?.message === "string"
+        ? data.message
+        : data?.message?.message || "Failed to change password",
+    );
+  }
+  return data as { success?: boolean; message?: string };
 }
 
 export async function createPartnerSacco(payload: CreateSaccoPayload) {
@@ -191,6 +210,7 @@ export async function listSaccoStaff(institutionId: string) {
     members?: Array<{
       id: string;
       status?: string;
+      accountStatus?: string;
       role?: string;
       permissions?: Record<string, unknown> | null;
       createdAt?: string | null;
@@ -246,6 +266,7 @@ export async function listPartnerTeamMembers(partnerId: string) {
       lastName?: string | null;
       role?: string;
       status?: string;
+      accountStatus?: string;
       canManageMembers?: boolean;
       canManageApiKeys?: boolean;
       canViewTransactions?: boolean;
@@ -272,7 +293,6 @@ export async function createPartnerStaff(
       body: JSON.stringify({
         partnerId,
         email: payload.email,
-        password: payload.password,
         firstName: payload.firstName,
         lastName: payload.lastName,
         phoneNumber: payload.phoneNumber,
@@ -751,4 +771,98 @@ export async function downloadSaccoUsersTemplate() {
   }
 
   return response.blob();
+}
+
+export type InvitationVerifyResponse = {
+  valid: boolean;
+  reason?: "INVALID" | "EXPIRED" | "ALREADY_USED" | "CANCELLED";
+  email?: string;
+  kind?: "PARTNER_TEAM" | "INSTITUTION_STAFF";
+};
+
+export async function verifyInvitationToken(invitationToken: string): Promise<InvitationVerifyResponse> {
+  const paths = ["/partner-auth/invitations/verify", "/api/v1/partner-auth/invitations/verify"];
+  let lastMessage = "Verification failed";
+  for (const path of paths) {
+    const response = await fetch(`${API_CONFIG.baseUrl}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ invitationToken }),
+    });
+    const data = (await response.json().catch(() => ({}))) as InvitationVerifyResponse & { message?: string };
+    if (response.status === 404) continue;
+    if (!response.ok) {
+      lastMessage = typeof data?.message === "string" ? data.message : lastMessage;
+      if (response.status >= 500) continue;
+      throw new Error(lastMessage);
+    }
+    return data;
+  }
+  throw new Error(lastMessage);
+}
+
+export async function completeInvitationWithPassword(
+  invitationToken: string,
+  password: string,
+): Promise<{ success?: boolean; message?: string }> {
+  const paths = ["/partner-auth/invitations/complete", "/api/v1/partner-auth/invitations/complete"];
+  let lastMessage = "Could not complete invitation";
+  for (const path of paths) {
+    const response = await fetch(`${API_CONFIG.baseUrl}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ invitationToken, password }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.status === 404) continue;
+    if (!response.ok) {
+      lastMessage =
+        (typeof data?.message === "string" && data.message) ||
+        (Array.isArray(data?.message) && data.message[0]) ||
+        lastMessage;
+      throw new Error(lastMessage);
+    }
+    return data as { success?: boolean; message?: string };
+  }
+  throw new Error(lastMessage);
+}
+
+export async function resendPartnerTeamInvitation(partnerId: string, memberId: string) {
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner/${partnerId}/members/${memberId}/resend-invitation`,
+    {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({}),
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const msg =
+      (typeof data?.message === "string" && data.message) ||
+      (typeof data?.message === "object" && data?.message?.message) ||
+      "Failed to resend invitation";
+    throw new Error(msg);
+  }
+  return data as { success?: boolean; message?: string };
+}
+
+export async function resendSaccoStaffInvitation(institutionId: string, memberId: string) {
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/staff/${memberId}/resend-invitation`,
+    {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({}),
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const msg =
+      (typeof data?.message === "string" && data.message) ||
+      (typeof data?.message === "object" && data?.message?.message) ||
+      "Failed to resend invitation";
+    throw new Error(msg);
+  }
+  return data as { success?: boolean; message?: string };
 }
