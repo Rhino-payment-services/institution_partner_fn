@@ -234,7 +234,7 @@ export default function SaccosPage() {
           onClick={closeCreateModal}
         >
           <div
-            className={ipc.modalPanel}
+            className={ipc.modalPanelLg}
             role="dialog"
             aria-modal="true"
             aria-labelledby="create-sacco-title"
@@ -260,16 +260,13 @@ export default function SaccosPage() {
                 </button>
               </div>
             </div>
-            <form onSubmit={handleCreateSacco}>
+            <form onSubmit={handleCreateSacco} className="flex min-h-0 flex-1 flex-col">
               <div className={`${ipc.modalBody} space-y-5`}>
-                {error && (
-                  <div
-                    className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
-                    role="alert"
-                  >
+                {error ? (
+                  <p className={ipc.formAlert} role="alert">
                     {error}
-                  </div>
-                )}
+                  </p>
+                ) : null}
                 {createModalStep === 1 && (
                   <>
                     <div>
