@@ -12,6 +12,9 @@ import {
   updateSaccoWithdrawalSettings,
   uploadSaccoUsersExcel,
 } from "@/lib/api";
+import { CreateMemberModal } from "@/components/members/CreateMemberModal";
+import { CreateStaffModal } from "@/components/members/CreateStaffModal";
+import type { MemberFormErrors } from "@/components/members/member-form-types";
 import { useAuth } from "@/lib/auth-context";
 import { ipc } from "@/lib/dashboard-ui";
 
