@@ -76,7 +76,6 @@ type CreateSaccoUserPayload = {
   accountNo?: string;
   clientId?: string;
   status?: string;
-  acknowledgePhoneNameMismatch?: boolean;
 };
 
 type CreateSaccoStaffPayload = {

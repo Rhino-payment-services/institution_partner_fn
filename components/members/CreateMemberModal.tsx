@@ -22,8 +22,6 @@ type Props = {
   memberAccountNo: string;
   memberEmail: string;
   memberClientId: string;
-  phoneMismatchOfficial: string | null;
-  acknowledgePhoneNameMismatch: boolean;
   onClose: () => void;
   onSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
   onSaccoChange: (id: string) => void;
@@ -35,7 +33,6 @@ type Props = {
   onAccountNoChange: (v: string) => void;
   onEmailChange: (v: string) => void;
   onClientIdChange: (v: string) => void;
-  onAcknowledgeMismatchChange: (v: boolean) => void;
 };
 
 export function CreateMemberModal({
@@ -55,8 +52,6 @@ export function CreateMemberModal({
   memberAccountNo,
   memberEmail,
   memberClientId,
-  phoneMismatchOfficial,
-  acknowledgePhoneNameMismatch,
   onClose,
   onSubmit,
   onSaccoChange,
@@ -68,7 +63,6 @@ export function CreateMemberModal({
   onAccountNoChange,
   onEmailChange,
   onClientIdChange,
-  onAcknowledgeMismatchChange,
 }: Props) {
   if (!open) return null;
 
@@ -188,20 +182,6 @@ export function CreateMemberModal({
               />
               {formErrors.phone ? <p className={ipc.fieldError}>{formErrors.phone}</p> : null}
             </div>
-            {phoneMismatchOfficial ? (
-              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-                <input
-                  type="checkbox"
-                  className="mt-0.5"
-                  checked={acknowledgePhoneNameMismatch}
-                  onChange={(e) => onAcknowledgeMismatchChange(e.target.checked)}
-                />
-                <span>
-                  I have verified this member&apos;s identity manually and understand the legal names may
-                  differ from the mobile money account holder ({phoneMismatchOfficial}).
-                </span>
-              </label>
-            ) : null}
             <div>
               <label htmlFor="member-national-id" className={ipc.formLabel}>
                 National ID / NIN
@@ -267,9 +247,7 @@ export function CreateMemberModal({
             <button
               type="submit"
               className={`${ipc.btnPrimary} w-full sm:w-auto`}
-              disabled={
-                isSubmitting || (Boolean(phoneMismatchOfficial) && !acknowledgePhoneNameMismatch)
-              }
+              disabled={isSubmitting}
             >
               {isSubmitting ? "Validating & creating…" : "Create member"}
             </button>

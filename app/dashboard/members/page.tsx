@@ -1,22 +1,21 @@
 "use client";
 
-import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  createSaccoStaff,
-  createSaccoUser,
-  downloadSaccoUsersTemplate,
-  listPartnerSaccos,
-  listSaccoStaff,
-  resendSaccoStaffInvitation,
-  updateSaccoWithdrawalSettings,
-  uploadSaccoUsersExcel,
-} from "@/lib/api";
 import { CreateMemberModal } from "@/components/members/CreateMemberModal";
 import { CreateStaffModal } from "@/components/members/CreateStaffModal";
 import type { MemberFormErrors } from "@/components/members/member-form-types";
+import {
+    createSaccoStaff,
+    createSaccoUser,
+    downloadSaccoUsersTemplate,
+    listPartnerSaccos,
+    listSaccoStaff,
+    resendSaccoStaffInvitation,
+    updateSaccoWithdrawalSettings,
+    uploadSaccoUsersExcel,
+} from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { ipc } from "@/lib/dashboard-ui";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type SaccoItem = {
   id: string;
@@ -93,10 +92,6 @@ export default function MembersPage() {
   const [memberDisplayName, setMemberDisplayName] = useState("");
   const [memberEmail, setMemberEmail] = useState("");
   const [memberFormErrors, setMemberFormErrors] = useState<MemberFormErrors>({});
-  const [memberPhoneMismatchOfficial, setMemberPhoneMismatchOfficial] = useState<string | null>(
-    null,
-  );
-  const [acknowledgePhoneNameMismatch, setAcknowledgePhoneNameMismatch] = useState(false);
   const [memberModalError, setMemberModalError] = useState("");
   const [staffModalError, setStaffModalError] = useState("");
   const [memberPhone, setMemberPhone] = useState("");
@@ -240,7 +235,6 @@ export default function MembersPage() {
         email: memberEmail.trim() || undefined,
         accountNo: accountNoTrimmed,
         clientId: memberClientId.trim() || undefined,
-        acknowledgePhoneNameMismatch: acknowledgePhoneNameMismatch || undefined,
       });
       setFeedback("SACCO user created successfully.");
       setMemberFirstName("");
@@ -251,23 +245,19 @@ export default function MembersPage() {
       setMemberEmail("");
       setMemberAccountNo("");
       setMemberClientId("");
-      setMemberPhoneMismatchOfficial(null);
-      setAcknowledgePhoneNameMismatch(false);
       setMemberModalError("");
       setIsCreateMemberModalOpen(false);
       await loadSaccos();
     } catch (err) {
       const apiErr = err as Error & { code?: string; officialName?: string };
       if (apiErr.code === "PHONE_NAME_MISMATCH") {
-        setMemberPhoneMismatchOfficial(apiErr.officialName || null);
         setMemberFormErrors({
           firstName: "Legal names do not match the phone account holder",
           lastName: "Legal names do not match the phone account holder",
-          form: apiErr.message,
         });
         setMemberModalError(
           apiErr.officialName
-            ? `Mobile money account name: ${apiErr.officialName}. Confirm the legal names are correct, or check the box below to proceed after manual verification.`
+            ? `The legal names do not match the mobile money account holder (${apiErr.officialName}). Please verify and correct the names.`
             : apiErr.message,
         );
       } else {
@@ -881,8 +871,6 @@ export default function MembersPage() {
         memberAccountNo={memberAccountNo}
         memberEmail={memberEmail}
         memberClientId={memberClientId}
-        phoneMismatchOfficial={memberPhoneMismatchOfficial}
-        acknowledgePhoneNameMismatch={acknowledgePhoneNameMismatch}
         onClose={() => setIsCreateMemberModalOpen(false)}
         onSubmit={handleCreateMember}
         onSaccoChange={(id) => {
@@ -891,22 +879,16 @@ export default function MembersPage() {
         }}
         onFirstNameChange={(v) => {
           setMemberFirstName(v);
-          setMemberFormErrors((prev) => ({ ...prev, firstName: undefined, form: undefined }));
-          setMemberPhoneMismatchOfficial(null);
-          setAcknowledgePhoneNameMismatch(false);
+          setMemberFormErrors((prev) => ({ ...prev, firstName: undefined }));
         }}
         onLastNameChange={(v) => {
           setMemberLastName(v);
-          setMemberFormErrors((prev) => ({ ...prev, lastName: undefined, form: undefined }));
-          setMemberPhoneMismatchOfficial(null);
-          setAcknowledgePhoneNameMismatch(false);
+          setMemberFormErrors((prev) => ({ ...prev, lastName: undefined }));
         }}
         onDisplayNameChange={setMemberDisplayName}
         onPhoneChange={(v) => {
           setMemberPhone(v);
-          setMemberFormErrors((prev) => ({ ...prev, phone: undefined, form: undefined }));
-          setMemberPhoneMismatchOfficial(null);
-          setAcknowledgePhoneNameMismatch(false);
+          setMemberFormErrors((prev) => ({ ...prev, phone: undefined }));
         }}
         onNationalIdChange={(v) => {
           setMemberNationalId(v);
@@ -918,7 +900,6 @@ export default function MembersPage() {
         }}
         onEmailChange={setMemberEmail}
         onClientIdChange={setMemberClientId}
-        onAcknowledgeMismatchChange={setAcknowledgePhoneNameMismatch}
       />
 
       <CreateStaffModal
