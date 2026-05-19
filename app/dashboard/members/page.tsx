@@ -36,6 +36,7 @@ type SaccoItem = {
 type PreviewRow = {
   firstName: string;
   lastName: string;
+  displayName?: string;
   phone: string;
   nationalId: string;
   email?: string;
@@ -86,7 +87,15 @@ export default function MembersPage() {
   const [saccoSearchQuery, setSaccoSearchQuery] = useState("");
   const [memberFirstName, setMemberFirstName] = useState("");
   const [memberLastName, setMemberLastName] = useState("");
+  const [memberDisplayName, setMemberDisplayName] = useState("");
   const [memberEmail, setMemberEmail] = useState("");
+  const [memberFormErrors, setMemberFormErrors] = useState<MemberFormErrors>({});
+  const [memberPhoneMismatchOfficial, setMemberPhoneMismatchOfficial] = useState<string | null>(
+    null,
+  );
+  const [acknowledgePhoneNameMismatch, setAcknowledgePhoneNameMismatch] = useState(false);
+  const [memberModalError, setMemberModalError] = useState("");
+  const [staffModalError, setStaffModalError] = useState("");
   const [memberPhone, setMemberPhone] = useState("");
   const [memberNationalId, setMemberNationalId] = useState("");
   const [memberAccountNo, setMemberAccountNo] = useState("");
@@ -189,48 +198,78 @@ export default function MembersPage() {
 
   async function handleCreateMember(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!selectedSaccoId) {
-      setError("Please select a SACCO first");
-      return;
-    }
-
+    setMemberModalError("");
     setError("");
-    setFeedback("");
+
+    const nextErrors: MemberFormErrors = {};
+    if (!selectedSaccoId) nextErrors.sacco = "Select a SACCO";
+    const firstName = memberFirstName.trim();
+    const lastName = memberLastName.trim();
+    const displayName = memberDisplayName.trim();
     const normalizedPhone = memberPhone.trim();
     const phoneDigits = normalizedPhone.replace(/\D/g, "");
-    if (!normalizedPhone || phoneDigits.length < 9) {
-      setError("Please enter a valid phone number before creating the SACCO member.");
-      return;
-    }
+    const nationalId = memberNationalId.trim();
     const accountNoTrimmed = memberAccountNo.trim();
-    if (!accountNoTrimmed) {
-      setError("SACCO account number is required for each member.");
+
+    if (!firstName) nextErrors.firstName = "First name is required";
+    if (!lastName) nextErrors.lastName = "Last name is required";
+    if (!normalizedPhone || phoneDigits.length < 9) {
+      nextErrors.phone = "Enter a valid phone number";
+    }
+    if (!nationalId) nextErrors.nationalId = "National ID is required";
+    if (!accountNoTrimmed) nextErrors.accountNo = "SACCO account number is required";
+
+    if (Object.keys(nextErrors).length > 0) {
+      setMemberFormErrors(nextErrors);
       return;
     }
 
+    setMemberFormErrors({});
+    setFeedback("");
     setIsCreatingMember(true);
     try {
       await createSaccoUser(selectedSaccoId, {
-        firstName: memberFirstName.trim(),
-        lastName: memberLastName.trim(),
+        firstName,
+        lastName,
+        displayName: displayName || undefined,
         phone: normalizedPhone,
-        nationalId: memberNationalId.trim(),
+        nationalId,
         email: memberEmail.trim() || undefined,
         accountNo: accountNoTrimmed,
         clientId: memberClientId.trim() || undefined,
+        acknowledgePhoneNameMismatch: acknowledgePhoneNameMismatch || undefined,
       });
       setFeedback("SACCO user created successfully.");
       setMemberFirstName("");
       setMemberLastName("");
+      setMemberDisplayName("");
       setMemberPhone("");
       setMemberNationalId("");
       setMemberEmail("");
       setMemberAccountNo("");
       setMemberClientId("");
+      setMemberPhoneMismatchOfficial(null);
+      setAcknowledgePhoneNameMismatch(false);
+      setMemberModalError("");
       setIsCreateMemberModalOpen(false);
       await loadSaccos();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create SACCO user");
+      const apiErr = err as Error & { code?: string; officialName?: string };
+      if (apiErr.code === "PHONE_NAME_MISMATCH") {
+        setMemberPhoneMismatchOfficial(apiErr.officialName || null);
+        setMemberFormErrors({
+          firstName: "Legal names do not match the phone account holder",
+          lastName: "Legal names do not match the phone account holder",
+          form: apiErr.message,
+        });
+        setMemberModalError(
+          apiErr.officialName
+            ? `Mobile money account name: ${apiErr.officialName}. Confirm the legal names are correct, or check the box below to proceed after manual verification.`
+            : apiErr.message,
+        );
+      } else {
+        setMemberModalError(apiErr.message || "Failed to create SACCO user");
+      }
     } finally {
       setIsCreatingMember(false);
     }
@@ -280,9 +319,11 @@ export default function MembersPage() {
 
     if (Object.keys(nextErrors).length > 0) {
       setStaffFormErrors(nextErrors);
+      setStaffModalError("Please fix the highlighted fields.");
       return;
     }
     setStaffFormErrors({});
+    setStaffModalError("");
     setIsCreatingStaff(true);
     try {
       await createSaccoStaff(selectedSaccoId, {
@@ -299,10 +340,11 @@ export default function MembersPage() {
       setStaffLastName("");
       setStaffRole("VIEWER");
       setStaffFormErrors({});
+      setStaffModalError("");
       setIsCreateStaffModalOpen(false);
       await loadSaccoStaff(selectedSaccoId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create SACCO staff login");
+      setStaffModalError(err instanceof Error ? err.message : "Failed to create SACCO staff login");
     } finally {
       setIsCreatingStaff(false);
     }
@@ -423,6 +465,7 @@ export default function MembersPage() {
       const parsedRows: PreviewRow[] = rows.map((row) => ({
         firstName: String(row.firstName ?? row.first_name ?? "").trim(),
         lastName: String(row.lastName ?? row.last_name ?? "").trim(),
+        displayName: String(row.displayName ?? row.display_name ?? "").trim() || undefined,
         phone: String(row.phone ?? row.phoneNumber ?? row.phone_number ?? "").trim(),
         nationalId: String(
           row.nationalId ?? row.national_id ?? row.nin ?? row.ninNumber ?? row.nin_number ?? "",
@@ -741,8 +784,8 @@ export default function MembersPage() {
         <article className={`${ipc.card} ${ipc.cardPad}`}>
           <h3 className="text-lg font-semibold tracking-tight text-slate-900">Bulk register SACCO customers by Excel</h3>
           <p className="mt-1 text-sm leading-relaxed text-slate-600">
-            Required columns: firstName, lastName, phone, nationalId (or nin), accountNo (SACCO account
-            number). Optional: email, clientId, status.
+            Required columns: firstName, lastName, phone, nationalId (or nin), accountNo.
+            Optional: displayName, email, clientId, status.
           </p>
           <div className="mt-4 space-y-3">
             <button type="button" onClick={handleDownloadTemplate} className={ipc.btnSecondary}>
@@ -818,228 +861,96 @@ export default function MembersPage() {
       </section>
       </div>
 
-      {isCreateMemberModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 backdrop-blur-[2px]">
-          <div className={`w-full max-w-xl ${ipc.card} ${ipc.cardPad} shadow-xl`}>
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-base font-semibold text-slate-900">Create Single User</h3>
-                <p className="mt-1 text-sm text-slate-600">
-                  Add member to {selectedSacco ? String(selectedSacco.name) : "selected SACCO"}.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsCreateMemberModalOpen(false)}
-                className="text-sm text-slate-500 hover:text-slate-700"
-              >
-                Close
-              </button>
-            </div>
-            <form className="mt-4 space-y-3" onSubmit={handleCreateMember}>
-              {isPartnerScope && (
-                <label className="block">
-                  <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-                    Select SACCO (required)
-                  </span>
-                  <select
-                    value={selectedSaccoId}
-                    onChange={(e) => setSelectedSaccoId(e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-[var(--rukapay-primary)] focus:ring-2 focus:ring-[#08163d]/15"
-                    required
-                  >
-                    <option value="">Select SACCO</option>
-                    {saccos.map((item) => (
-                      <option key={String(item.id)} value={String(item.id)}>
-                        {String(item.code || "")} - {String(item.name || "")}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              <input
-                value={memberFirstName}
-                onChange={(e) => setMemberFirstName(e.target.value)}
-                placeholder="First Name"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-[var(--rukapay-primary)] focus:ring-2 focus:ring-[#08163d]/15"
-                required
-              />
-              <input
-                value={memberLastName}
-                onChange={(e) => setMemberLastName(e.target.value)}
-                placeholder="Last Name"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-[var(--rukapay-primary)] focus:ring-2 focus:ring-[#08163d]/15"
-                required
-              />
-              <input
-                value={memberPhone}
-                onChange={(e) => setMemberPhone(e.target.value)}
-                placeholder="Phone (required)"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-[var(--rukapay-primary)] focus:ring-2 focus:ring-[#08163d]/15"
-                required
-              />
-              <input
-                value={memberNationalId}
-                onChange={(e) => setMemberNationalId(e.target.value)}
-                placeholder="National ID / NIN (required)"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-[var(--rukapay-primary)] focus:ring-2 focus:ring-[#08163d]/15"
-                required
-              />
-              <input
-                value={memberAccountNo}
-                onChange={(e) => setMemberAccountNo(e.target.value)}
-                placeholder="SACCO account number (required)"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-[var(--rukapay-primary)] focus:ring-2 focus:ring-[#08163d]/15"
-                required
-                autoComplete="off"
-              />
-              <input
-                value={memberEmail}
-                onChange={(e) => setMemberEmail(e.target.value)}
-                placeholder="Email (optional)"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-[var(--rukapay-primary)] focus:ring-2 focus:ring-[#08163d]/15"
-              />
-              <input
-                value={memberClientId}
-                onChange={(e) => setMemberClientId(e.target.value)}
-                placeholder="Client ID (optional)"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-[var(--rukapay-primary)] focus:ring-2 focus:ring-[#08163d]/15"
-              />
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!isCreatingMember) setIsCreateMemberModalOpen(false);
-                  }}
-                  className={ipc.btnSecondary}
-                  disabled={isCreatingMember}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className={ipc.btnPrimary} disabled={isCreatingMember}>
-                  {isCreatingMember ? "Validating & creating..." : "Create user"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <CreateMemberModal
+        open={isCreateMemberModalOpen}
+        isPartnerScope={isPartnerScope}
+        saccos={saccos}
+        selectedSaccoId={selectedSaccoId}
+        selectedSaccoName={selectedSacco ? String(selectedSacco.name) : ""}
+        isSubmitting={isCreatingMember}
+        modalError={memberModalError}
+        formErrors={memberFormErrors}
+        memberFirstName={memberFirstName}
+        memberLastName={memberLastName}
+        memberDisplayName={memberDisplayName}
+        memberPhone={memberPhone}
+        memberNationalId={memberNationalId}
+        memberAccountNo={memberAccountNo}
+        memberEmail={memberEmail}
+        memberClientId={memberClientId}
+        phoneMismatchOfficial={memberPhoneMismatchOfficial}
+        acknowledgePhoneNameMismatch={acknowledgePhoneNameMismatch}
+        onClose={() => setIsCreateMemberModalOpen(false)}
+        onSubmit={handleCreateMember}
+        onSaccoChange={(id) => {
+          setSelectedSaccoId(id);
+          setMemberFormErrors((prev) => ({ ...prev, sacco: undefined }));
+        }}
+        onFirstNameChange={(v) => {
+          setMemberFirstName(v);
+          setMemberFormErrors((prev) => ({ ...prev, firstName: undefined, form: undefined }));
+          setMemberPhoneMismatchOfficial(null);
+          setAcknowledgePhoneNameMismatch(false);
+        }}
+        onLastNameChange={(v) => {
+          setMemberLastName(v);
+          setMemberFormErrors((prev) => ({ ...prev, lastName: undefined, form: undefined }));
+          setMemberPhoneMismatchOfficial(null);
+          setAcknowledgePhoneNameMismatch(false);
+        }}
+        onDisplayNameChange={setMemberDisplayName}
+        onPhoneChange={(v) => {
+          setMemberPhone(v);
+          setMemberFormErrors((prev) => ({ ...prev, phone: undefined, form: undefined }));
+          setMemberPhoneMismatchOfficial(null);
+          setAcknowledgePhoneNameMismatch(false);
+        }}
+        onNationalIdChange={(v) => {
+          setMemberNationalId(v);
+          setMemberFormErrors((prev) => ({ ...prev, nationalId: undefined }));
+        }}
+        onAccountNoChange={(v) => {
+          setMemberAccountNo(v);
+          setMemberFormErrors((prev) => ({ ...prev, accountNo: undefined }));
+        }}
+        onEmailChange={setMemberEmail}
+        onClientIdChange={setMemberClientId}
+        onAcknowledgeMismatchChange={setAcknowledgePhoneNameMismatch}
+      />
 
-      {isCreateStaffModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 backdrop-blur-[2px]">
-          <div className={`w-full max-w-2xl ${ipc.card} ${ipc.cardPad} shadow-xl`}>
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-base font-semibold text-slate-900">Create SACCO Staff Login</h3>
-            <p className="mt-1 text-sm text-slate-600">
-              Add staff account for {selectedSacco ? String(selectedSacco.name) : "selected SACCO"}. An invitation
-              email will be sent so they can choose their own password.
-            </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsCreateStaffModalOpen(false)}
-                className="text-sm text-slate-500 hover:text-slate-700"
-              >
-                Close
-              </button>
-            </div>
-            <form className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2" onSubmit={handleCreateStaff} noValidate>
-              <div>
-                <input
-                  value={staffFirstName}
-                  onChange={(e) => {
-                    setStaffFirstName(e.target.value);
-                    setStaffFormErrors((prev) => ({ ...prev, firstName: undefined }));
-                  }}
-                  placeholder="First Name"
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
-                  aria-invalid={Boolean(staffFormErrors.firstName)}
-                />
-                {staffFormErrors.firstName ? (
-                  <p className="mt-1 text-xs text-red-600">{staffFormErrors.firstName}</p>
-                ) : null}
-              </div>
-              <div>
-                <input
-                  value={staffLastName}
-                  onChange={(e) => {
-                    setStaffLastName(e.target.value);
-                    setStaffFormErrors((prev) => ({ ...prev, lastName: undefined }));
-                  }}
-                  placeholder="Last Name"
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
-                  aria-invalid={Boolean(staffFormErrors.lastName)}
-                />
-                {staffFormErrors.lastName ? (
-                  <p className="mt-1 text-xs text-red-600">{staffFormErrors.lastName}</p>
-                ) : null}
-              </div>
-              <div>
-                <input
-                  value={staffEmail}
-                  onChange={(e) => {
-                    setStaffEmail(e.target.value);
-                    setStaffFormErrors((prev) => ({ ...prev, email: undefined }));
-                  }}
-                  placeholder="staff@sacco.com"
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
-                  type="email"
-                  aria-invalid={Boolean(staffFormErrors.email)}
-                />
-                {staffFormErrors.email ? (
-                  <p className="mt-1 text-xs text-red-600">{staffFormErrors.email}</p>
-                ) : null}
-              </div>
-              <div>
-                <input
-                  value={staffPhone}
-                  onChange={(e) => {
-                    setStaffPhone(e.target.value);
-                    setStaffFormErrors((prev) => ({ ...prev, phone: undefined }));
-                  }}
-                  placeholder="+2567..."
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
-                  aria-invalid={Boolean(staffFormErrors.phone)}
-                />
-                {staffFormErrors.phone ? (
-                  <p className="mt-1 text-xs text-red-600">{staffFormErrors.phone}</p>
-                ) : null}
-              </div>
-              <div>
-                <select
-                  value={staffRole}
-                  onChange={(e) =>
-                    setStaffRole(e.target.value as "OWNER" | "ADMIN" | "OPERATOR" | "VIEWER")
-                  }
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm"
-                >
-                  <option value="OWNER">OWNER</option>
-                  <option value="ADMIN">ADMIN</option>
-                  <option value="OPERATOR">OPERATOR</option>
-                  <option value="VIEWER">VIEWER</option>
-                </select>
-              </div>
-              <div className="md:col-span-2 flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsCreateStaffModalOpen(false)}
-                  className={ipc.btnSecondary}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={!selectedSaccoId || isCreatingStaff}
-                  className={`${ipc.btnPrimary} disabled:cursor-not-allowed disabled:opacity-50`}
-                >
-                  {isCreatingStaff ? "Sending invitation…" : "Send invitation"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <CreateStaffModal
+        open={isCreateStaffModalOpen}
+        selectedSaccoName={selectedSacco ? String(selectedSacco.name) : ""}
+        selectedSaccoId={selectedSaccoId}
+        isSubmitting={isCreatingStaff}
+        modalError={staffModalError}
+        formErrors={staffFormErrors}
+        staffFirstName={staffFirstName}
+        staffLastName={staffLastName}
+        staffEmail={staffEmail}
+        staffPhone={staffPhone}
+        staffRole={staffRole}
+        onClose={() => setIsCreateStaffModalOpen(false)}
+        onSubmit={handleCreateStaff}
+        onFirstNameChange={(v) => {
+          setStaffFirstName(v);
+          setStaffFormErrors((prev) => ({ ...prev, firstName: undefined }));
+        }}
+        onLastNameChange={(v) => {
+          setStaffLastName(v);
+          setStaffFormErrors((prev) => ({ ...prev, lastName: undefined }));
+        }}
+        onEmailChange={(v) => {
+          setStaffEmail(v);
+          setStaffFormErrors((prev) => ({ ...prev, email: undefined }));
+        }}
+        onPhoneChange={(v) => {
+          setStaffPhone(v);
+          setStaffFormErrors((prev) => ({ ...prev, phone: undefined }));
+        }}
+        onRoleChange={setStaffRole}
+      />
+
         </>
       )}
     </>

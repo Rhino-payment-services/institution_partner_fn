@@ -10,6 +10,7 @@ type MemberItem = {
   id: string;
   accountNo?: string | null;
   clientId?: string | null;
+  displayName?: string | null;
   status?: string;
   user?: {
     email?: string | null;
@@ -82,7 +83,8 @@ export default function SaccoMembersPage() {
           <table className={ipc.table}>
             <thead>
               <tr className={ipc.theadRow}>
-                <th className={ipc.th}>Name</th>
+                <th className={ipc.th}>Display name</th>
+                <th className={ipc.th}>Legal name</th>
                 <th className={ipc.th}>Phone</th>
                 <th className={ipc.th}>Email</th>
                 <th className={ipc.th}>Account no</th>
@@ -93,7 +95,7 @@ export default function SaccoMembersPage() {
             <tbody>
               {!loading && members.length === 0 && (
                 <tr>
-                  <td className={`${ipc.td} text-slate-600`} colSpan={6}>
+                  <td className={`${ipc.td} text-slate-600`} colSpan={7}>
                     No members found for this SACCO.
                   </td>
                 </tr>
@@ -101,10 +103,12 @@ export default function SaccoMembersPage() {
               {members.map((member) => {
                 const firstName = member.user?.profile?.firstName || "";
                 const lastName = member.user?.profile?.lastName || "";
-                const fullName = `${firstName} ${lastName}`.trim() || "—";
+                const legalName = `${firstName} ${lastName}`.trim() || "—";
+                const displayName = member.displayName?.trim() || legalName;
                 return (
                   <tr key={member.id} className={ipc.tbodyRow}>
-                    <td className={`${ipc.td} font-medium`}>{fullName}</td>
+                    <td className={`${ipc.td} font-medium`}>{displayName}</td>
+                    <td className={ipc.td}>{legalName}</td>
                     <td className={ipc.td}>{member.user?.phone || "—"}</td>
                     <td className={ipc.td}>{member.user?.email || "—"}</td>
                     <td className={ipc.td}>{member.accountNo || "—"}</td>

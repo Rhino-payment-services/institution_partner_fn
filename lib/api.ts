@@ -69,12 +69,14 @@ type CreateSaccoPayload = {
 type CreateSaccoUserPayload = {
   firstName: string;
   lastName: string;
+  displayName?: string;
   phone: string;
   nationalId: string;
   email?: string;
   accountNo?: string;
   clientId?: string;
   status?: string;
+  acknowledgePhoneNameMismatch?: boolean;
 };
 
 type CreateSaccoStaffPayload = {
@@ -319,7 +321,18 @@ export async function createSaccoUser(institutionId: string, payload: CreateSacc
   );
 
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data?.message || "Failed to create user");
+  if (!response.ok) {
+    const err = new Error(
+      typeof data?.message === "string"
+        ? data.message
+        : Array.isArray(data?.message)
+          ? data.message.join(", ")
+          : "Failed to create user",
+    ) as Error & { code?: string; officialName?: string };
+    if (data?.code) err.code = String(data.code);
+    if (data?.officialName) err.officialName = String(data.officialName);
+    throw err;
+  }
   return data;
 }
 
@@ -340,6 +353,7 @@ export async function listSaccoUsers(institutionId: string) {
       id: string;
       accountNo?: string | null;
       clientId?: string | null;
+      displayName?: string | null;
       status?: string;
       createdAt?: string | null;
       user?: {
