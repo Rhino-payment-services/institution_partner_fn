@@ -26,7 +26,8 @@ export const ipc = {
     "flex w-full max-w-2xl max-h-[min(90vh,100dvh)] flex-col overflow-hidden rounded-3xl border border-slate-200/90 bg-white shadow-2xl shadow-slate-900/20",
   modalHeader:
     "shrink-0 border-b border-slate-100 bg-slate-50/40 px-6 py-5 sm:px-8",
-  modalBody: "flex-1 overflow-y-auto px-6 py-6 sm:px-8",
+  modalBody:
+    "min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-6 sm:px-8 [-webkit-overflow-scrolling:touch]",
   modalFooter: "shrink-0 flex flex-col-reverse gap-3 border-t border-slate-100 bg-slate-50/30 px-6 py-4 sm:flex-row sm:justify-end sm:px-8",
   formLabel: "text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500",
   fieldError: "mt-1.5 text-xs font-medium text-red-600",
