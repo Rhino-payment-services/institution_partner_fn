@@ -234,7 +234,7 @@ export default function StaffPage() {
           onClick={() => setIsCreateModalOpen(false)}
         >
           <div
-            className={ipc.modalPanel}
+            className={ipc.modalPanelLg}
             role="dialog"
             aria-modal="true"
             aria-labelledby="create-staff-title"
@@ -259,7 +259,7 @@ export default function StaffPage() {
                 </button>
               </div>
             </div>
-            <form onSubmit={handleCreateStaff}>
+            <form onSubmit={handleCreateStaff} className="flex min-h-0 flex-1 flex-col">
               <div className={`${ipc.modalBody} grid grid-cols-1 gap-3 md:grid-cols-2`}>
                 <input
                   value={staffFirstName}
