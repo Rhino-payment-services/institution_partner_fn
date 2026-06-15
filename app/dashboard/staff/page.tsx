@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { createPartnerStaff, listPartnerTeamMembers, resendPartnerTeamInvitation } from "@/lib/api";
+import { createPartnerStaff, listPartnerTeamMembers, resendPartnerTeamInvitation, updatePartnerStaff } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { ipc } from "@/lib/dashboard-ui";
 
@@ -36,6 +36,7 @@ export default function StaffPage() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [resendMemberId, setResendMemberId] = useState<string | null>(null);
+  const [updatingRoleId, setUpdatingRoleId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [feedback, setFeedback] = useState("");
 
@@ -66,6 +67,24 @@ export default function StaffPage() {
       setError(err instanceof Error ? err.message : "Failed to resend invitation");
     } finally {
       setResendMemberId(null);
+    }
+  }
+
+  async function handleRoleChange(
+    memberId: string,
+    role: "OWNER" | "ADMIN" | "DEVELOPER" | "MEMBER" | "VIEWER",
+  ) {
+    setUpdatingRoleId(memberId);
+    setError("");
+    setFeedback("");
+    try {
+      await updatePartnerStaff(memberId, { role });
+      setFeedback("Staff role updated.");
+      if (partnerId) await loadPartnerStaff(partnerId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update staff role");
+    } finally {
+      setUpdatingRoleId(null);
     }
   }
 
@@ -196,7 +215,25 @@ export default function StaffPage() {
                       <td className={ipc.td}>{`${first} ${last}`.trim() || "—"}</td>
                       <td className={ipc.td}>{s.email || "—"}</td>
                       <td className={ipc.td}>—</td>
-                      <td className={ipc.td}>{s.role || "VIEWER"}</td>
+                      <td className={ipc.td}>
+                        <select
+                          value={s.role || "VIEWER"}
+                          disabled={updatingRoleId === s.id}
+                          onChange={(e) =>
+                            void handleRoleChange(
+                              s.id,
+                              e.target.value as "OWNER" | "ADMIN" | "DEVELOPER" | "MEMBER" | "VIEWER",
+                            )
+                          }
+                          className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-800"
+                        >
+                          <option value="OWNER">OWNER</option>
+                          <option value="ADMIN">ADMIN</option>
+                          <option value="DEVELOPER">DEVELOPER</option>
+                          <option value="MEMBER">MEMBER</option>
+                          <option value="VIEWER">VIEWER</option>
+                        </select>
+                      </td>
                       <td className={ipc.td}>
                         <span
                           className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${badgeClass}`}

@@ -6,8 +6,9 @@ import { useEffect, useMemo, useState } from "react";
 import {
   listPartnerSaccos,
   listSaccoTransactions,
+  listSaccoUsers,
 } from "@/lib/api";
-import { ipc } from "@/lib/dashboard-ui";
+import { institutionStatusBadgeClass, ipc } from "@/lib/dashboard-ui";
 
 type SaccoItem = {
   id: string;
@@ -27,6 +28,22 @@ type SaccoItem = {
   _count?: {
     members?: number;
   };
+};
+
+type MemberItem = {
+  id: string;
+  accountNo?: string | null;
+  clientId?: string | null;
+  displayName?: string | null;
+  status?: string;
+  user?: {
+    email?: string | null;
+    phone?: string | null;
+    profile?: {
+      firstName?: string | null;
+      lastName?: string | null;
+    } | null;
+  } | null;
 };
 
 export default function SaccoDetailPage() {
@@ -76,6 +93,8 @@ export default function SaccoDetailPage() {
     } | null;
   } | null>(null);
   const [isLoadingTransactions, setIsLoadingTransactions] = useState(false);
+  const [members, setMembers] = useState<MemberItem[]>([]);
+  const [isLoadingMembers, setIsLoadingMembers] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -85,6 +104,7 @@ export default function SaccoDetailPage() {
   useEffect(() => {
     if (!saccoId) return;
     void loadTransactions(String(saccoId));
+    void loadMembers(String(saccoId));
   }, [saccoId]);
 
   async function loadSaccos() {
@@ -94,6 +114,18 @@ export default function SaccoDetailPage() {
       setSaccos(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load SACCO details");
+    }
+  }
+
+  async function loadMembers(institutionId: string) {
+    setIsLoadingMembers(true);
+    try {
+      const data = await listSaccoUsers(institutionId);
+      setMembers((data?.members || []) as MemberItem[]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load SACCO members");
+    } finally {
+      setIsLoadingMembers(false);
     }
   }
 
@@ -173,7 +205,7 @@ export default function SaccoDetailPage() {
   }
 
   return (
-    <>
+    <div className={ipc.pageStack}>
       <section className={`${ipc.card} ${ipc.cardPad}`}>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
@@ -198,11 +230,6 @@ export default function SaccoDetailPage() {
             Back to SACCOs
           </Link>
         </div>
-        <div className="mt-5">
-          <Link href={`/dashboard/saccos/${saccoId}/members`} className={ipc.btnPrimary}>
-            View members
-          </Link>
-        </div>
       </section>
 
       {error && (
@@ -210,6 +237,76 @@ export default function SaccoDetailPage() {
           {error}
         </p>
       )}
+
+      <section className={`${ipc.card} ${ipc.cardPad}`}>
+        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-lg font-semibold tracking-tight text-slate-900">Members</h3>
+            <p className="mt-1 text-sm leading-relaxed text-slate-600">
+              Customer members linked to this SACCO.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-medium text-slate-700">Total: {members.length}</p>
+            <Link href="/dashboard/members" className={ipc.btnPrimary}>
+              Manage members
+            </Link>
+          </div>
+        </div>
+        <div className={ipc.tableWrap}>
+          <table className={ipc.table}>
+            <thead>
+              <tr className={ipc.theadRow}>
+                <th className={ipc.th}>Display name</th>
+                <th className={ipc.th}>Legal name</th>
+                <th className={ipc.th}>Phone</th>
+                <th className={ipc.th}>Email</th>
+                <th className={ipc.th}>Account no</th>
+                <th className={ipc.th}>Client ID</th>
+                <th className={ipc.th}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {isLoadingMembers ? (
+                <tr>
+                  <td className={`${ipc.td} text-slate-600`} colSpan={7}>
+                    Loading members…
+                  </td>
+                </tr>
+              ) : members.length === 0 ? (
+                <tr>
+                  <td className={`${ipc.td} text-slate-600`} colSpan={7}>
+                    No members found for this SACCO.
+                  </td>
+                </tr>
+              ) : (
+                members.map((member) => {
+                  const firstName = member.user?.profile?.firstName || "";
+                  const lastName = member.user?.profile?.lastName || "";
+                  const legalName = `${firstName} ${lastName}`.trim() || "—";
+                  const displayName = member.displayName?.trim() || legalName;
+                  return (
+                    <tr key={member.id} className={ipc.tbodyRow}>
+                      <td className={`${ipc.td} font-medium`}>{displayName}</td>
+                      <td className={ipc.td}>{legalName}</td>
+                      <td className={ipc.td}>{member.user?.phone || "—"}</td>
+                      <td className={ipc.td}>{member.user?.email || "—"}</td>
+                      <td className={ipc.td}>{member.accountNo || "—"}</td>
+                      <td className={ipc.td}>{member.clientId || "—"}</td>
+                      <td className={ipc.td}>
+                        <span className={institutionStatusBadgeClass(member.status)}>
+                          {member.status || "—"}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <section className={`${ipc.card} ${ipc.cardPad}`}>
         <h3 className="text-lg font-semibold tracking-tight text-slate-900">Transactions</h3>
         <p className="mt-1 text-sm leading-relaxed text-slate-600">
@@ -316,6 +413,6 @@ export default function SaccoDetailPage() {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }

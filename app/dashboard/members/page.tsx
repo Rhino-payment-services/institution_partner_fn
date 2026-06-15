@@ -1,20 +1,30 @@
 "use client";
 
-import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createSaccoStaff,
   createSaccoUser,
+  createSaccoUsersBulkSequential,
+  deleteSaccoUser,
   downloadSaccoUsersTemplate,
   listPartnerSaccos,
   listSaccoStaff,
+  listSaccoUsers,
   resendSaccoStaffInvitation,
+  updateSaccoStaff,
+  updateSaccoUser,
   updateSaccoWithdrawalSettings,
-  uploadSaccoUsersExcel,
+  validateSaccoMemberPhone,
 } from "@/lib/api";
 import { CreateMemberModal } from "@/components/members/CreateMemberModal";
 import { CreateStaffModal } from "@/components/members/CreateStaffModal";
+import { EditMemberModal, type SaccoCustomerMember } from "@/components/members/EditMemberModal";
 import type { MemberFormErrors } from "@/components/members/member-form-types";
+import {
+  isNationalIdNotApplicableValue,
+  parseTruthyExcelFlag,
+  validateMemberNationalId,
+} from "@/lib/member-validation";
 import { useAuth } from "@/lib/auth-context";
 import { ipc } from "@/lib/dashboard-ui";
 
@@ -36,16 +46,24 @@ type SaccoItem = {
   };
 };
 
+type BulkVerifyStatus = "pending" | "ok" | "mismatch" | "error" | "registered";
+
 type PreviewRow = {
   firstName: string;
   lastName: string;
   displayName?: string;
   phone: string;
   nationalId: string;
+  nationalIdNotApplicable?: boolean;
   email?: string;
   accountNo?: string;
   clientId?: string;
   status?: string;
+  verifyStatus?: BulkVerifyStatus;
+  officialName?: string;
+  verifyError?: string;
+  approvedMismatch?: boolean;
+  registerError?: string;
 };
 
 type StaffItem = {
@@ -101,14 +119,31 @@ export default function MembersPage() {
   const [staffModalError, setStaffModalError] = useState("");
   const [memberPhone, setMemberPhone] = useState("");
   const [memberNationalId, setMemberNationalId] = useState("");
+  const [memberNationalIdNotApplicable, setMemberNationalIdNotApplicable] = useState(false);
   const [memberAccountNo, setMemberAccountNo] = useState("");
   const [memberClientId, setMemberClientId] = useState("");
   const [isCreatingMember, setIsCreatingMember] = useState(false);
   const [bulkFile, setBulkFile] = useState<File | null>(null);
+  const bulkFileInputRef = useRef<HTMLInputElement>(null);
   const [previewRows, setPreviewRows] = useState<PreviewRow[]>([]);
   const [previewErrors, setPreviewErrors] = useState<string[]>([]);
   const [isParsingFile, setIsParsingFile] = useState(false);
   const [bulkRowErrors, setBulkRowErrors] = useState<string[]>([]);
+  const [isBulkVerifying, setIsBulkVerifying] = useState(false);
+  const [isBulkUploading, setIsBulkUploading] = useState(false);
+  const [customerRows, setCustomerRows] = useState<SaccoCustomerMember[]>([]);
+  const [customerSearch, setCustomerSearch] = useState("");
+  const [isLoadingCustomers, setIsLoadingCustomers] = useState(false);
+  const [editingMember, setEditingMember] = useState<SaccoCustomerMember | null>(null);
+  const [editDisplayName, setEditDisplayName] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [editAccountNo, setEditAccountNo] = useState("");
+  const [editClientId, setEditClientId] = useState("");
+  const [editStatus, setEditStatus] = useState("ACTIVE");
+  const [editModalError, setEditModalError] = useState("");
+  const [isSavingMemberEdit, setIsSavingMemberEdit] = useState(false);
+  const [deletingMemberId, setDeletingMemberId] = useState<string | null>(null);
+  const [updatingStaffRoleId, setUpdatingStaffRoleId] = useState<string | null>(null);
   const [staffRows, setStaffRows] = useState<StaffItem[]>([]);
   const [staffEmail, setStaffEmail] = useState("");
   const [staffPhone, setStaffPhone] = useState("");
@@ -124,6 +159,7 @@ export default function MembersPage() {
   const [minimumWithdrawAmount, setMinimumWithdrawAmount] = useState("");
   const [maximumWithdrawAmount, setMaximumWithdrawAmount] = useState("");
   const [isSavingWithdrawalSettings, setIsSavingWithdrawalSettings] = useState(false);
+  const [withdrawalControlsOpen, setWithdrawalControlsOpen] = useState(false);
   const [error, setError] = useState("");
   const [feedback, setFeedback] = useState("");
 
@@ -141,6 +177,58 @@ export default function MembersPage() {
       return code.includes(query) || name.includes(query);
     });
   }, [saccos, saccoSearchQuery]);
+
+  const filteredCustomerRows = useMemo(() => {
+    const q = customerSearch.trim().toLowerCase();
+    if (!q) return customerRows;
+    return customerRows.filter((row) => {
+      const first = row.user?.profile?.firstName || "";
+      const last = row.user?.profile?.lastName || "";
+      const haystack = [
+        first,
+        last,
+        row.displayName,
+        row.user?.phone,
+        row.user?.email,
+        row.accountNo,
+        row.clientId,
+        row.user?.profile?.nationalId,
+      ]
+        .map((v) => String(v || "").toLowerCase())
+        .join(" ");
+      return haystack.includes(q);
+    });
+  }, [customerRows, customerSearch]);
+
+  const bulkSummary = useMemo(() => {
+    let pending = 0;
+    let ok = 0;
+    let mismatch = 0;
+    let mismatchApproved = 0;
+    let error = 0;
+    let registered = 0;
+    for (const row of previewRows) {
+      const status = row.verifyStatus ?? "pending";
+      if (status === "pending") pending += 1;
+      else if (status === "ok") ok += 1;
+      else if (status === "mismatch") {
+        mismatch += 1;
+        if (row.approvedMismatch) mismatchApproved += 1;
+      } else if (status === "error") error += 1;
+      else if (status === "registered") registered += 1;
+    }
+    const readyToRegister =
+      ok + mismatchApproved;
+    return {
+      pending,
+      ok,
+      mismatch,
+      mismatchApproved,
+      error,
+      registered,
+      readyToRegister,
+    };
+  }, [previewRows]);
 
   const loadSaccos = useCallback(async () => {
     setError("");
@@ -167,9 +255,11 @@ export default function MembersPage() {
   useEffect(() => {
     if (!selectedSaccoId) {
       setStaffRows([]);
+      setCustomerRows([]);
       return;
     }
     void loadSaccoStaff(selectedSaccoId);
+    void loadSaccoCustomers(selectedSaccoId);
   }, [selectedSaccoId]);
 
   useEffect(() => {
@@ -199,6 +289,127 @@ export default function MembersPage() {
     }
   }
 
+  async function loadSaccoCustomers(institutionId: string) {
+    setIsLoadingCustomers(true);
+    try {
+      const data = await listSaccoUsers(institutionId);
+      setCustomerRows((data?.members || []) as SaccoCustomerMember[]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load SACCO customers");
+    } finally {
+      setIsLoadingCustomers(false);
+    }
+  }
+
+  function exportCustomersCsv() {
+    const rows = filteredCustomerRows;
+    if (rows.length === 0) return;
+    const header = [
+      "firstName",
+      "lastName",
+      "displayName",
+      "phone",
+      "email",
+      "nationalId",
+      "accountNo",
+      "clientId",
+      "status",
+    ];
+    const lines = rows.map((row) => {
+      const values = [
+        row.user?.profile?.firstName || "",
+        row.user?.profile?.lastName || "",
+        row.displayName || "",
+        row.user?.phone || "",
+        row.user?.email || "",
+        row.user?.profile?.nationalId || "N/A",
+        row.accountNo || "",
+        row.clientId || "",
+        row.status || "",
+      ];
+      return values.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",");
+    });
+    const blob = new Blob([[header.join(","), ...lines].join("\n")], {
+      type: "text/csv;charset=utf-8;",
+    });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `sacco-customers-${selectedSaccoId}.csv`;
+    link.click();
+    window.URL.revokeObjectURL(url);
+  }
+
+  function openEditMember(member: SaccoCustomerMember) {
+    setEditingMember(member);
+    setEditDisplayName(member.displayName || "");
+    setEditEmail(member.user?.email || "");
+    setEditAccountNo(member.accountNo || "");
+    setEditClientId(member.clientId || "");
+    setEditStatus(member.status || "ACTIVE");
+    setEditModalError("");
+  }
+
+  async function handleSaveMemberEdit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!selectedSaccoId || !editingMember) return;
+    setEditModalError("");
+    setIsSavingMemberEdit(true);
+    try {
+      await updateSaccoUser(selectedSaccoId, editingMember.id, {
+        displayName: editDisplayName.trim() || undefined,
+        email: editEmail.trim() || undefined,
+        accountNo: editAccountNo.trim() || undefined,
+        clientId: editClientId.trim() || undefined,
+        status: editStatus,
+      });
+      setFeedback("Member updated successfully.");
+      setEditingMember(null);
+      await loadSaccoCustomers(selectedSaccoId);
+      await loadSaccos();
+    } catch (err) {
+      setEditModalError(err instanceof Error ? err.message : "Failed to update member");
+    } finally {
+      setIsSavingMemberEdit(false);
+    }
+  }
+
+  async function handleDeleteMember(memberId: string) {
+    if (!selectedSaccoId) return;
+    if (!window.confirm("Remove this member from the SACCO? This cannot be undone.")) return;
+    setError("");
+    setFeedback("");
+    setDeletingMemberId(memberId);
+    try {
+      await deleteSaccoUser(selectedSaccoId, memberId);
+      setFeedback("Member removed successfully.");
+      await loadSaccoCustomers(selectedSaccoId);
+      await loadSaccos();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete member");
+    } finally {
+      setDeletingMemberId(null);
+    }
+  }
+
+  async function handleStaffRoleChange(
+    memberId: string,
+    role: "OWNER" | "ADMIN" | "OPERATOR" | "VIEWER",
+  ) {
+    if (!selectedSaccoId) return;
+    setUpdatingStaffRoleId(memberId);
+    setError("");
+    try {
+      await updateSaccoStaff(selectedSaccoId, memberId, { role });
+      setFeedback("Staff role updated.");
+      await loadSaccoStaff(selectedSaccoId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update staff role");
+    } finally {
+      setUpdatingStaffRoleId(null);
+    }
+  }
+
   async function handleCreateMember(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setMemberModalError("");
@@ -213,13 +424,16 @@ export default function MembersPage() {
     const phoneDigits = normalizedPhone.replace(/\D/g, "");
     const nationalId = memberNationalId.trim();
     const accountNoTrimmed = memberAccountNo.trim();
+    const ninNotApplicable =
+      memberNationalIdNotApplicable || isNationalIdNotApplicableValue(nationalId);
 
     if (!firstName) nextErrors.firstName = "First name is required";
     if (!lastName) nextErrors.lastName = "Last name is required";
     if (!normalizedPhone || phoneDigits.length < 9) {
       nextErrors.phone = "Enter a valid phone number";
     }
-    if (!nationalId) nextErrors.nationalId = "National ID is required";
+    const ninError = validateMemberNationalId(nationalId, ninNotApplicable);
+    if (ninError) nextErrors.nationalId = ninError;
     if (!accountNoTrimmed) nextErrors.accountNo = "SACCO account number is required";
 
     if (Object.keys(nextErrors).length > 0) {
@@ -236,7 +450,8 @@ export default function MembersPage() {
         lastName,
         displayName: displayName || undefined,
         phone: normalizedPhone,
-        nationalId,
+        nationalId: ninNotApplicable ? undefined : nationalId.toUpperCase(),
+        nationalIdNotApplicable: ninNotApplicable || undefined,
         email: memberEmail.trim() || undefined,
         accountNo: accountNoTrimmed,
         clientId: memberClientId.trim() || undefined,
@@ -248,6 +463,7 @@ export default function MembersPage() {
       setMemberDisplayName("");
       setMemberPhone("");
       setMemberNationalId("");
+      setMemberNationalIdNotApplicable(false);
       setMemberEmail("");
       setMemberAccountNo("");
       setMemberClientId("");
@@ -256,6 +472,7 @@ export default function MembersPage() {
       setMemberModalError("");
       setIsCreateMemberModalOpen(false);
       await loadSaccos();
+      await loadSaccoCustomers(selectedSaccoId);
     } catch (err) {
       const apiErr = err as Error & { code?: string; officialName?: string };
       if (apiErr.code === "PHONE_NAME_MISMATCH") {
@@ -407,36 +624,194 @@ export default function MembersPage() {
     }
   }
 
-  async function handleBulkUpload() {
+  async function handleBulkVerify() {
     if (!selectedSaccoId) {
       setError("Please select a SACCO first");
       return;
     }
-    if (!bulkFile) {
-      setError("Please choose an Excel file first");
+    if (previewRows.length === 0) {
+      setError("Please choose an Excel file with valid rows first");
       return;
     }
+    if (previewErrors.length > 0) {
+      setError("Fix Excel validation errors before verifying phones");
+      return;
+    }
+
     setFeedback("");
     setError("");
     setBulkRowErrors([]);
+    setIsBulkVerifying(true);
+
+    const nextRows = [...previewRows];
     try {
-      const result = await uploadSaccoUsersExcel(selectedSaccoId, bulkFile);
-      setFeedback(
-        `Bulk upload complete: ${result.successCount ?? 0} success, ${result.failCount ?? 0} failed.`,
+      for (let i = 0; i < nextRows.length; i += 1) {
+        const row = nextRows[i];
+        if (row.verifyStatus === "registered") continue;
+
+        try {
+          const result = await validateSaccoMemberPhone(selectedSaccoId, {
+            firstName: row.firstName,
+            lastName: row.lastName,
+            phone: row.phone,
+          });
+          if (result.status === "OK") {
+            nextRows[i] = {
+              ...row,
+              verifyStatus: "ok",
+              officialName: result.officialName,
+              verifyError: undefined,
+              approvedMismatch: false,
+              registerError: undefined,
+            };
+          } else if (result.status === "MISMATCH") {
+            nextRows[i] = {
+              ...row,
+              verifyStatus: "mismatch",
+              officialName: result.officialName,
+              verifyError: result.error,
+              approvedMismatch: false,
+              registerError: undefined,
+            };
+          } else {
+            nextRows[i] = {
+              ...row,
+              verifyStatus: "error",
+              officialName: result.officialName,
+              verifyError: result.error || "Phone validation failed",
+              approvedMismatch: false,
+              registerError: undefined,
+            };
+          }
+        } catch (err) {
+          nextRows[i] = {
+            ...row,
+            verifyStatus: "error",
+            verifyError: err instanceof Error ? err.message : "Phone validation failed",
+            approvedMismatch: false,
+            registerError: undefined,
+          };
+        }
+      }
+
+      setPreviewRows(nextRows);
+      const summary = nextRows.reduce(
+        (acc, row) => {
+          const status = row.verifyStatus ?? "pending";
+          if (status === "ok") acc.ok += 1;
+          else if (status === "mismatch") acc.mismatch += 1;
+          else if (status === "error") acc.error += 1;
+          else if (status === "registered") acc.registered += 1;
+          return acc;
+        },
+        { ok: 0, mismatch: 0, error: 0, registered: 0 },
       );
-      const failures = Array.isArray(result?.results)
-        ? (result.results as Array<Record<string, unknown>>)
-            .filter((row) => row?.success !== true)
-            .slice(0, 10)
-            .map((row) => `Row ${String(row.index ?? "?")}: ${String(row.error || "Failed")}`)
-        : [];
-      setBulkRowErrors(failures);
-      setBulkFile(null);
-      setPreviewRows([]);
-      setPreviewErrors([]);
-      await loadSaccos();
+      setFeedback(
+        `Phone verification complete: ${summary.ok} OK, ${summary.mismatch} mismatch, ${summary.error} error${summary.registered ? `, ${summary.registered} already registered` : ""}.`,
+      );
+    } finally {
+      setIsBulkVerifying(false);
+    }
+  }
+
+  function toggleBulkRowApproval(index: number, approved: boolean) {
+    setPreviewRows((rows) =>
+      rows.map((row, i) =>
+        i === index && row.verifyStatus === "mismatch"
+          ? { ...row, approvedMismatch: approved }
+          : row,
+      ),
+    );
+  }
+
+  async function handleBulkRegister() {
+    if (!selectedSaccoId) {
+      setError("Please select a SACCO first");
+      return;
+    }
+    if (previewRows.length === 0 || previewErrors.length > 0) {
+      setError("Fix Excel validation errors before registering");
+      return;
+    }
+    if (bulkSummary.pending > 0) {
+      setError("Verify phone numbers for all rows before registering");
+      return;
+    }
+    if (bulkSummary.readyToRegister === 0) {
+      setError("No rows ready to register. Approve mismatches or fix errors first.");
+      return;
+    }
+
+    setFeedback("");
+    setError("");
+    setBulkRowErrors([]);
+    setIsBulkUploading(true);
+
+    const indicesToRegister = previewRows
+      .map((row, index) => ({ row, index }))
+      .filter(({ row }) => {
+        if (row.verifyStatus === "registered") return false;
+        if (row.verifyStatus === "ok") return true;
+        if (row.verifyStatus === "mismatch" && row.approvedMismatch) return true;
+        return false;
+      });
+
+    const payloads = indicesToRegister.map(({ row }) => {
+      const ninNa =
+        row.nationalIdNotApplicable === true || isNationalIdNotApplicableValue(row.nationalId);
+      return {
+        firstName: row.firstName,
+        lastName: row.lastName,
+        displayName: row.displayName,
+        phone: row.phone,
+        nationalId: ninNa ? undefined : row.nationalId.toUpperCase(),
+        nationalIdNotApplicable: ninNa || undefined,
+        email: row.email,
+        accountNo: row.accountNo,
+        clientId: row.clientId,
+        status: row.status,
+        acknowledgePhoneNameMismatch: row.verifyStatus === "mismatch" || undefined,
+      };
+    });
+
+    try {
+      const result = await createSaccoUsersBulkSequential(selectedSaccoId, payloads);
+      const nextRows = [...previewRows];
+      const failures: string[] = [];
+
+      result.results.forEach((outcome, resultIndex) => {
+        const sourceIndex = indicesToRegister[resultIndex]?.index;
+        if (sourceIndex === undefined) return;
+        if (outcome.success) {
+          nextRows[sourceIndex] = {
+            ...nextRows[sourceIndex],
+            verifyStatus: "registered",
+            registerError: undefined,
+          };
+        } else {
+          nextRows[sourceIndex] = {
+            ...nextRows[sourceIndex],
+            registerError: outcome.error || "Registration failed",
+          };
+          failures.push(
+            `Row ${sourceIndex + 1} (${nextRows[sourceIndex].firstName} ${nextRows[sourceIndex].lastName}): ${outcome.error || "Failed"}`,
+          );
+        }
+      });
+
+      setPreviewRows(nextRows);
+      setFeedback(
+        `Registration complete: ${result.successCount ?? 0} created, ${result.failCount ?? 0} failed, ${previewRows.length - indicesToRegister.length} skipped (not approved or already registered).`,
+      );
+      setBulkRowErrors(failures.slice(0, 15));
+      if (result.successCount > 0) {
+        await loadSaccos();
+        await loadSaccoCustomers(selectedSaccoId);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to upload users file");
+      setError(err instanceof Error ? err.message : "Failed to register users");
+    } finally {
+      setIsBulkUploading(false);
     }
   }
 
@@ -465,19 +840,31 @@ export default function MembersPage() {
       }
 
       const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-      const parsedRows: PreviewRow[] = rows.map((row) => ({
-        firstName: String(row.firstName ?? row.first_name ?? "").trim(),
-        lastName: String(row.lastName ?? row.last_name ?? "").trim(),
-        displayName: String(row.displayName ?? row.display_name ?? "").trim() || undefined,
-        phone: String(row.phone ?? row.phoneNumber ?? row.phone_number ?? "").trim(),
-        nationalId: String(
+      const parsedRows: PreviewRow[] = rows.map((row) => {
+        const nationalIdRaw = String(
           row.nationalId ?? row.national_id ?? row.nin ?? row.ninNumber ?? row.nin_number ?? "",
-        ).trim(),
-        email: String(row.email ?? "").trim() || undefined,
-        accountNo: String(row.accountNo ?? row.account_no ?? "").trim() || undefined,
-        clientId: String(row.clientId ?? row.client_id ?? "").trim() || undefined,
-        status: String(row.status ?? "ACTIVE").trim() || "ACTIVE",
-      }));
+        ).trim();
+        const nationalIdNotApplicable =
+          parseTruthyExcelFlag(
+            row.nationalIdNotApplicable ??
+              row.national_id_not_applicable ??
+              row.ninNotApplicable ??
+              row.nin_not_applicable,
+          ) || isNationalIdNotApplicableValue(nationalIdRaw);
+        return {
+          firstName: String(row.firstName ?? row.first_name ?? "").trim(),
+          lastName: String(row.lastName ?? row.last_name ?? "").trim(),
+          displayName: String(row.displayName ?? row.display_name ?? "").trim() || undefined,
+          phone: String(row.phone ?? row.phoneNumber ?? row.phone_number ?? "").trim(),
+          nationalId: nationalIdRaw,
+          nationalIdNotApplicable,
+          verifyStatus: "pending" as BulkVerifyStatus,
+          email: String(row.email ?? "").trim() || undefined,
+          accountNo: String(row.accountNo ?? row.account_no ?? "").trim() || undefined,
+          clientId: String(row.clientId ?? row.client_id ?? "").trim() || undefined,
+          status: String(row.status ?? "ACTIVE").trim() || "ACTIVE",
+        };
+      });
 
       const validationErrors = parsedRows
         .map((row, index) => {
@@ -485,10 +872,14 @@ export default function MembersPage() {
           if (!row.firstName) missingFields.push("firstName");
           if (!row.lastName) missingFields.push("lastName");
           if (!row.phone) missingFields.push("phone");
-          if (!row.nationalId) missingFields.push("nationalId");
           if (!row.accountNo) missingFields.push("accountNo");
+          const ninError = validateMemberNationalId(
+            row.nationalId,
+            row.nationalIdNotApplicable === true,
+          );
+          if (ninError) missingFields.push(`nationalId (${ninError})`);
           return missingFields.length > 0
-            ? `Row ${index + 2}: missing ${missingFields.join(", ")}`
+            ? `Row ${index + 2}: ${missingFields.join(", ")}`
             : null;
         })
         .filter((msg): msg is string => Boolean(msg))
@@ -590,81 +981,212 @@ export default function MembersPage() {
 
       {canManageInstitution && (
         <section className={`${ipc.card} ${ipc.cardPad}`}>
-          <h3 className="text-lg font-semibold tracking-tight text-slate-900">Withdrawal controls</h3>
-          <p className="mt-1 text-sm leading-relaxed text-slate-600">
-            Control whether SACCO withdrawals are available on USSD.
-          </p>
-          <form className="mt-4 space-y-3" onSubmit={handleSaveWithdrawalSettings}>
-            <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={withdrawalsEnabled}
-                onChange={(e) => setWithdrawalsEnabled(e.target.checked)}
-              />
-              Enable withdrawals (master switch)
-            </label>
-            <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={savingsWithdrawEnabled}
-                onChange={(e) => setSavingsWithdrawEnabled(e.target.checked)}
-                disabled={!withdrawalsEnabled}
-              />
-              Allow savings withdrawal
-            </label>
-            <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-              <input
-                type="checkbox"
-                checked={sharesWithdrawEnabled}
-                onChange={(e) => setSharesWithdrawEnabled(e.target.checked)}
-                disabled={!withdrawalsEnabled}
-              />
-              Allow shares withdrawal
-            </label>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              <label className="block rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Minimum withdrawal amount (UGX)
-                </span>
-                <input
-                  type="number"
-                  min={0}
-                  step={1}
-                  inputMode="numeric"
-                  value={minimumWithdrawAmount}
-                  onChange={(e) => setMinimumWithdrawAmount(e.target.value)}
-                  disabled={!withdrawalsEnabled}
-                  placeholder="e.g. 5000"
-                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-[var(--rukapay-primary)] focus:ring-2 focus:ring-[#08163d]/15 disabled:bg-slate-100 disabled:text-slate-500"
-                />
-              </label>
-              <label className="block rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Maximum withdrawal amount (UGX)
-                </span>
-                <input
-                  type="number"
-                  min={0}
-                  step={1}
-                  inputMode="numeric"
-                  value={maximumWithdrawAmount}
-                  onChange={(e) => setMaximumWithdrawAmount(e.target.value)}
-                  disabled={!withdrawalsEnabled}
-                  placeholder="e.g. 2000000"
-                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-[var(--rukapay-primary)] focus:ring-2 focus:ring-[#08163d]/15 disabled:bg-slate-100 disabled:text-slate-500"
-                />
-              </label>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="text-lg font-semibold tracking-tight text-slate-900">Withdrawal controls</h3>
+              <p className="mt-1 text-sm leading-relaxed text-slate-600">
+                USSD withdrawal settings for the selected SACCO.
+              </p>
             </div>
             <button
-              type="submit"
-              disabled={!selectedSaccoId || isSavingWithdrawalSettings}
-              className={ipc.btnPrimary}
+              type="button"
+              onClick={() => setWithdrawalControlsOpen((open) => !open)}
+              disabled={!selectedSaccoId}
+              className={`${ipc.btnSecondary} disabled:cursor-not-allowed disabled:opacity-50`}
             >
-              {isSavingWithdrawalSettings ? "Saving..." : "Save withdrawal settings"}
+              {withdrawalControlsOpen ? "Hide settings" : "Configure withdrawals"}
             </button>
-          </form>
+          </div>
+          {withdrawalControlsOpen && (
+            <form className="mt-4 space-y-3 border-t border-slate-200 pt-4" onSubmit={handleSaveWithdrawalSettings}>
+              <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={withdrawalsEnabled}
+                  onChange={(e) => setWithdrawalsEnabled(e.target.checked)}
+                />
+                Enable withdrawals (master switch)
+              </label>
+              <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={savingsWithdrawEnabled}
+                  onChange={(e) => setSavingsWithdrawEnabled(e.target.checked)}
+                  disabled={!withdrawalsEnabled}
+                />
+                Allow savings withdrawal
+              </label>
+              <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={sharesWithdrawEnabled}
+                  onChange={(e) => setSharesWithdrawEnabled(e.target.checked)}
+                  disabled={!withdrawalsEnabled}
+                />
+                Allow shares withdrawal
+              </label>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                <label className="block rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Minimum withdrawal amount (UGX)
+                  </span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    inputMode="numeric"
+                    value={minimumWithdrawAmount}
+                    onChange={(e) => setMinimumWithdrawAmount(e.target.value)}
+                    disabled={!withdrawalsEnabled}
+                    placeholder="e.g. 5000"
+                    className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-[var(--rukapay-primary)] focus:ring-2 focus:ring-[#08163d]/15 disabled:bg-slate-100 disabled:text-slate-500"
+                  />
+                </label>
+                <label className="block rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                  <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Maximum withdrawal amount (UGX)
+                  </span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    inputMode="numeric"
+                    value={maximumWithdrawAmount}
+                    onChange={(e) => setMaximumWithdrawAmount(e.target.value)}
+                    disabled={!withdrawalsEnabled}
+                    placeholder="e.g. 2000000"
+                    className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-[var(--rukapay-primary)] focus:ring-2 focus:ring-[#08163d]/15 disabled:bg-slate-100 disabled:text-slate-500"
+                  />
+                </label>
+              </div>
+              <button
+                type="submit"
+                disabled={!selectedSaccoId || isSavingWithdrawalSettings}
+                className={ipc.btnPrimary}
+              >
+                {isSavingWithdrawalSettings ? "Saving..." : "Save withdrawal settings"}
+              </button>
+            </form>
+          )}
         </section>
       )}
+
+      <section className={`${ipc.card} ${ipc.cardPad}`}>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-lg font-semibold tracking-tight text-slate-900">SACCO customer members</h3>
+            <p className="mt-1 text-sm leading-relaxed text-slate-600">
+              Registered SACCO customers for the selected institution. Legal names cannot be edited after registration.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void loadSaccoCustomers(selectedSaccoId)}
+              disabled={!selectedSaccoId || isLoadingCustomers}
+              className={ipc.btnSecondary}
+            >
+              {isLoadingCustomers ? "Refreshing…" : "Refresh"}
+            </button>
+            <button
+              type="button"
+              onClick={exportCustomersCsv}
+              disabled={filteredCustomerRows.length === 0}
+              className={ipc.btnSecondary}
+            >
+              Export CSV
+            </button>
+          </div>
+        </div>
+        <div className="mt-4">
+          <input
+            type="search"
+            value={customerSearch}
+            onChange={(e) => setCustomerSearch(e.target.value)}
+            placeholder="Search by name, phone, email, account, NIN…"
+            className="w-full max-w-md rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-[var(--rukapay-primary)] focus:ring-2 focus:ring-[#08163d]/15"
+          />
+        </div>
+        <div className={`mt-4 ${ipc.tableWrap}`}>
+          <table className={ipc.table}>
+            <thead>
+              <tr className={ipc.theadRow}>
+                <th className={ipc.th}>Name</th>
+                <th className={ipc.th}>Phone</th>
+                <th className={ipc.th}>Email</th>
+                <th className={ipc.th}>NIN</th>
+                <th className={ipc.th}>Account</th>
+                <th className={ipc.th}>Client ID</th>
+                <th className={ipc.th}>Status</th>
+                <th className={ipc.th}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!selectedSaccoId ? (
+                <tr>
+                  <td className={`${ipc.td} text-slate-600`} colSpan={8}>
+                    Select a SACCO to view customer members.
+                  </td>
+                </tr>
+              ) : isLoadingCustomers ? (
+                <tr>
+                  <td className={`${ipc.td} text-slate-600`} colSpan={8}>
+                    Loading customer members…
+                  </td>
+                </tr>
+              ) : filteredCustomerRows.length === 0 ? (
+                <tr>
+                  <td className={`${ipc.td} text-slate-600`} colSpan={8}>
+                    No SACCO customer members yet.
+                  </td>
+                </tr>
+              ) : (
+                filteredCustomerRows.map((row) => {
+                  const first = row.user?.profile?.firstName || "";
+                  const last = row.user?.profile?.lastName || "";
+                  const display =
+                    row.displayName?.trim() ||
+                    `${first} ${last}`.trim() ||
+                    "—";
+                  return (
+                    <tr key={row.id} className={ipc.tbodyRow}>
+                      <td className={ipc.td}>{display}</td>
+                      <td className={ipc.td}>{row.user?.phone || "—"}</td>
+                      <td className={ipc.td}>{row.user?.email || "—"}</td>
+                      <td className={ipc.td}>{row.user?.profile?.nationalId || "N/A"}</td>
+                      <td className={ipc.td}>{row.accountNo || "—"}</td>
+                      <td className={ipc.td}>{row.clientId || "—"}</td>
+                      <td className={ipc.td}>{row.status || "—"}</td>
+                      <td className={ipc.td}>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            onClick={() => openEditMember(row)}
+                            className="text-sm font-medium text-[var(--rukapay-primary)] hover:underline"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleDeleteMember(row.id)}
+                            disabled={deletingMemberId === row.id}
+                            className="text-sm font-medium text-red-700 hover:underline disabled:opacity-50"
+                          >
+                            {deletingMemberId === row.id ? "Deleting…" : "Delete"}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-2 text-xs text-slate-500">
+          Showing {filteredCustomerRows.length} of {customerRows.length} customer member(s).
+        </p>
+      </section>
 
       <section className={`${ipc.card} ${ipc.cardPad}`}>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -723,7 +1245,28 @@ export default function MembersPage() {
                       <td className={ipc.td}>{`${first} ${last}`.trim() || "—"}</td>
                       <td className={ipc.td}>{s.user?.email || "—"}</td>
                       <td className={ipc.td}>{s.user?.phone || "—"}</td>
-                      <td className={ipc.td}>{s.role || "VIEWER"}</td>
+                      <td className={ipc.td}>
+                        {canManageMembers ? (
+                          <select
+                            value={s.role || "VIEWER"}
+                            disabled={updatingStaffRoleId === s.id}
+                            onChange={(e) =>
+                              void handleStaffRoleChange(
+                                s.id,
+                                e.target.value as "OWNER" | "ADMIN" | "OPERATOR" | "VIEWER",
+                              )
+                            }
+                            className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-800"
+                          >
+                            <option value="OWNER">OWNER</option>
+                            <option value="ADMIN">ADMIN</option>
+                            <option value="OPERATOR">OPERATOR</option>
+                            <option value="VIEWER">VIEWER</option>
+                          </select>
+                        ) : (
+                          s.role || "VIEWER"
+                        )}
+                      </td>
                       <td className={ipc.td}>
                         <span
                           className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${badgeClass}`}
@@ -787,28 +1330,78 @@ export default function MembersPage() {
         <article className={`${ipc.card} ${ipc.cardPad}`}>
           <h3 className="text-lg font-semibold tracking-tight text-slate-900">Bulk register SACCO customers by Excel</h3>
           <p className="mt-1 text-sm leading-relaxed text-slate-600">
-            Required columns: firstName, lastName, phone, nationalId (or nin), accountNo.
-            Optional: displayName, email, clientId, status.
+            Upload Excel, verify each phone against legal names (same as single registration), approve any
+            mismatches per row, then register. Required: firstName, lastName, phone, accountNo. NIN optional
+            (use N/A or nationalIdNotApplicable=yes).
           </p>
           <div className="mt-4 space-y-3">
-            <button type="button" onClick={handleDownloadTemplate} className={ipc.btnSecondary}>
-              Download Excel template
-            </button>
-            <input
-              type="file"
-              accept=".xlsx,.xls"
-              onChange={(e) => void handleBulkFileChange(e.target.files?.[0] || null)}
-              className="block w-full text-sm text-slate-700"
-            />
+            <div className="flex flex-wrap items-center gap-3">
+              <button type="button" onClick={handleDownloadTemplate} className={ipc.btnSecondary}>
+                Download Excel template
+              </button>
+              <input
+                ref={bulkFileInputRef}
+                type="file"
+                accept=".xlsx,.xls"
+                className="sr-only"
+                onChange={(e) => void handleBulkFileChange(e.target.files?.[0] || null)}
+              />
+              <button
+                type="button"
+                onClick={() => bulkFileInputRef.current?.click()}
+                disabled={!selectedSaccoId}
+                className={`${ipc.btnSecondary} disabled:cursor-not-allowed disabled:opacity-50`}
+              >
+                Choose Excel file
+              </button>
+              {bulkFile ? (
+                <span className="text-sm text-slate-600">
+                  Selected: <span className="font-medium text-slate-800">{bulkFile.name}</span>
+                </span>
+              ) : (
+                <span className="text-sm text-slate-500">No file selected</span>
+              )}
+            </div>
             {isParsingFile && <p className="text-xs text-slate-500">Reading Excel file...</p>}
-            <button
-              type="button"
-              onClick={handleBulkUpload}
-              disabled={!selectedSaccoId || !bulkFile || previewRows.length === 0 || previewErrors.length > 0}
-              className={`${ipc.btnPrimary} disabled:cursor-not-allowed disabled:opacity-50`}
-            >
-              Confirm and register
-            </button>
+            {previewRows.length > 0 && (
+              <p className="text-xs text-slate-600">
+                {bulkSummary.readyToRegister} ready to register · {bulkSummary.mismatch - bulkSummary.mismatchApproved} mismatch
+                need approval · {bulkSummary.error} error · {bulkSummary.registered} registered
+                {bulkSummary.pending > 0 ? ` · ${bulkSummary.pending} not verified yet` : ""}
+              </p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={handleBulkVerify}
+                disabled={
+                  !selectedSaccoId ||
+                  previewRows.length === 0 ||
+                  previewErrors.length > 0 ||
+                  isBulkVerifying ||
+                  isBulkUploading
+                }
+                className={`${ipc.btnSecondary} disabled:cursor-not-allowed disabled:opacity-50`}
+              >
+                {isBulkVerifying ? "Verifying phones…" : "1. Verify phone numbers"}
+              </button>
+              <button
+                type="button"
+                onClick={handleBulkRegister}
+                disabled={
+                  !selectedSaccoId ||
+                  previewRows.length === 0 ||
+                  previewErrors.length > 0 ||
+                  bulkSummary.pending > 0 ||
+                  bulkSummary.readyToRegister === 0 ||
+                  isBulkVerifying ||
+                  isBulkUploading
+                }
+                className={`${ipc.btnPrimary} disabled:cursor-not-allowed disabled:opacity-50`}
+              >
+                {isBulkUploading ? "Registering…" : "2. Register verified rows"}
+              </button>
+            </div>
 
             {bulkFile && !isParsingFile && (
               <p className="text-xs text-slate-500">
@@ -819,41 +1412,87 @@ export default function MembersPage() {
             {previewRows.length > 0 && (
               <div className={`mt-3 ${ipc.tableWrap}`}>
                 <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="text-sm font-semibold text-slate-900">Excel preview</p>
+                  <p className="text-sm font-semibold text-slate-900">Bulk preview & verification</p>
                   <p className="text-xs text-slate-600">
-                    Showing first {Math.min(previewRows.length, 20)} row(s) before registration.
+                    Approve mismatch rows after confirming identity manually (same as single member create).
                   </p>
                 </div>
-                <div className="max-h-72 overflow-auto">
+                <div className="max-h-96 overflow-auto">
                   <table className={ipc.table}>
                     <thead>
                       <tr className={ipc.theadRow}>
                         <th className={ipc.th}>#</th>
-                        <th className={ipc.th}>First name</th>
-                        <th className={ipc.th}>Last name</th>
+                        <th className={ipc.th}>Name</th>
                         <th className={ipc.th}>Phone</th>
-                        <th className={ipc.th}>National ID</th>
-                        <th className={ipc.th}>Email</th>
-                        <th className={ipc.th}>Account no</th>
-                        <th className={ipc.th}>Client ID</th>
+                        <th className={ipc.th}>Account</th>
+                        <th className={ipc.th}>MNO account name</th>
+                        <th className={ipc.th}>Status</th>
+                        <th className={ipc.th}>Approve</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {previewRows.slice(0, 20).map((row, index) => (
-                        <tr
-                          key={`${row.firstName}-${row.lastName}-${row.phone}-${index}`}
-                          className={ipc.tbodyRow}
-                        >
-                          <td className={ipc.tdNum}>{index + 1}</td>
-                          <td className={ipc.td}>{row.firstName || "—"}</td>
-                          <td className={ipc.td}>{row.lastName || "—"}</td>
-                          <td className={ipc.td}>{row.phone || "—"}</td>
-                          <td className={ipc.td}>{row.nationalId || "—"}</td>
-                          <td className={ipc.td}>{row.email || "—"}</td>
-                          <td className={ipc.td}>{row.accountNo || "—"}</td>
-                          <td className={ipc.td}>{row.clientId || "—"}</td>
-                        </tr>
-                      ))}
+                      {previewRows.map((row, index) => {
+                        const status = row.verifyStatus ?? "pending";
+                        const statusClass =
+                          status === "ok" || status === "registered"
+                            ? "bg-emerald-50 text-emerald-800 ring-emerald-600/20"
+                            : status === "mismatch"
+                              ? "bg-amber-50 text-amber-900 ring-amber-600/20"
+                              : status === "error"
+                                ? "bg-red-50 text-red-800 ring-red-600/20"
+                                : "bg-slate-100 text-slate-700 ring-slate-500/20";
+                        const statusLabel =
+                          status === "ok"
+                            ? "OK"
+                            : status === "mismatch"
+                              ? "Mismatch"
+                              : status === "error"
+                                ? "Error"
+                                : status === "registered"
+                                  ? "Registered"
+                                  : "Pending";
+                        return (
+                          <tr
+                            key={`${row.firstName}-${row.lastName}-${row.phone}-${index}`}
+                            className={ipc.tbodyRow}
+                          >
+                            <td className={ipc.tdNum}>{index + 1}</td>
+                            <td className={ipc.td}>
+                              {`${row.firstName} ${row.lastName}`.trim() || "—"}
+                              {row.registerError ? (
+                                <p className="mt-0.5 text-xs text-red-600">{row.registerError}</p>
+                              ) : null}
+                              {row.verifyError && status === "error" ? (
+                                <p className="mt-0.5 text-xs text-red-600">{row.verifyError}</p>
+                              ) : null}
+                            </td>
+                            <td className={ipc.td}>{row.phone || "—"}</td>
+                            <td className={ipc.td}>{row.accountNo || "—"}</td>
+                            <td className={ipc.td}>{row.officialName || "—"}</td>
+                            <td className={ipc.td}>
+                              <span
+                                className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${statusClass}`}
+                              >
+                                {statusLabel}
+                              </span>
+                            </td>
+                            <td className={ipc.td}>
+                              {status === "mismatch" ? (
+                                <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700">
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(row.approvedMismatch)}
+                                    onChange={(e) => toggleBulkRowApproval(index, e.target.checked)}
+                                  />
+                                  Verified manually
+                                </label>
+                              ) : (
+                                <span className="text-xs text-slate-400">—</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -878,6 +1517,7 @@ export default function MembersPage() {
         memberDisplayName={memberDisplayName}
         memberPhone={memberPhone}
         memberNationalId={memberNationalId}
+        memberNationalIdNotApplicable={memberNationalIdNotApplicable}
         memberAccountNo={memberAccountNo}
         memberEmail={memberEmail}
         memberClientId={memberClientId}
@@ -910,6 +1550,11 @@ export default function MembersPage() {
         }}
         onNationalIdChange={(v) => {
           setMemberNationalId(v);
+          setMemberFormErrors((prev) => ({ ...prev, nationalId: undefined }));
+        }}
+        onNationalIdNotApplicableChange={(v) => {
+          setMemberNationalIdNotApplicable(v);
+          if (v) setMemberNationalId("");
           setMemberFormErrors((prev) => ({ ...prev, nationalId: undefined }));
         }}
         onAccountNoChange={(v) => {
@@ -952,6 +1597,25 @@ export default function MembersPage() {
           setStaffFormErrors((prev) => ({ ...prev, phone: undefined }));
         }}
         onRoleChange={setStaffRole}
+      />
+
+      <EditMemberModal
+        open={Boolean(editingMember)}
+        member={editingMember}
+        isSubmitting={isSavingMemberEdit}
+        error={editModalError}
+        displayName={editDisplayName}
+        email={editEmail}
+        accountNo={editAccountNo}
+        clientId={editClientId}
+        status={editStatus}
+        onClose={() => setEditingMember(null)}
+        onSubmit={handleSaveMemberEdit}
+        onDisplayNameChange={setEditDisplayName}
+        onEmailChange={setEditEmail}
+        onAccountNoChange={setEditAccountNo}
+        onClientIdChange={setEditClientId}
+        onStatusChange={setEditStatus}
       />
 
         </>
