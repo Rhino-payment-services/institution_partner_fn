@@ -71,12 +71,29 @@ type CreateSaccoUserPayload = {
   lastName: string;
   displayName?: string;
   phone: string;
-  nationalId: string;
+  nationalId?: string;
+  nationalIdNotApplicable?: boolean;
   email?: string;
   accountNo?: string;
   clientId?: string;
   status?: string;
   acknowledgePhoneNameMismatch?: boolean;
+};
+
+type UpdateSaccoUserPayload = {
+  displayName?: string;
+  email?: string;
+  accountNo?: string;
+  clientId?: string;
+  status?: string;
+};
+
+type UpdateSaccoStaffPayload = {
+  role: "OWNER" | "ADMIN" | "OPERATOR" | "VIEWER";
+  canViewTransactions?: boolean;
+  canManageMembers?: boolean;
+  canManageInstitution?: boolean;
+  canRequestLiquidation?: boolean;
 };
 
 type CreateSaccoStaffPayload = {
@@ -307,6 +324,27 @@ export async function createPartnerStaff(
   return data;
 }
 
+export async function updatePartnerStaff(
+  memberId: string,
+  payload: {
+    role?: PartnerStaffRole;
+    canViewTransactions?: boolean;
+    canManageApiKeys?: boolean;
+    canViewAnalytics?: boolean;
+    canManageMembers?: boolean;
+    canConfigureTariffs?: boolean;
+  },
+) {
+  const response = await authFetch(`${API_CONFIG.baseUrl}/partner/members/${memberId}`, {
+    method: "PATCH",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to update partner staff");
+  return data;
+}
+
 export async function createSaccoUser(institutionId: string, payload: CreateSaccoUserPayload) {
   const response = await authFetch(
     `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/users`,
@@ -359,9 +397,120 @@ export async function listSaccoUsers(institutionId: string) {
       user?: {
         email?: string | null;
         phone?: string | null;
-        profile?: { firstName?: string | null; lastName?: string | null } | null;
+        profile?: {
+          firstName?: string | null;
+          lastName?: string | null;
+          nationalId?: string | null;
+        } | null;
       } | null;
     }>;
+  };
+}
+
+export async function updateSaccoUser(
+  institutionId: string,
+  memberId: string,
+  payload: UpdateSaccoUserPayload,
+) {
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/users/${memberId}`,
+    {
+      method: "PATCH",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload),
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to update SACCO member");
+  return data;
+}
+
+export async function deleteSaccoUser(institutionId: string, memberId: string) {
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/users/${memberId}`,
+    {
+      method: "DELETE",
+      headers: getAuthHeaders(),
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to delete SACCO member");
+  return data as { success?: boolean; message?: string };
+}
+
+export async function updateSaccoStaff(
+  institutionId: string,
+  memberId: string,
+  payload: UpdateSaccoStaffPayload,
+) {
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/staff/${memberId}`,
+    {
+      method: "PATCH",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload),
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to update SACCO staff role");
+  return data;
+}
+
+export type SaccoMemberPhoneValidation = {
+  status: "OK" | "MISMATCH" | "ERROR";
+  matchStatus?: "MATCHED" | "FLEXIBLE";
+  officialName?: string;
+  error?: string;
+};
+
+export async function validateSaccoMemberPhone(
+  institutionId: string,
+  payload: { firstName: string; lastName: string; phone: string },
+) {
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/users/validate-phone`,
+    {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload),
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to validate phone");
+  return data as SaccoMemberPhoneValidation;
+}
+
+export async function createSaccoUsersBulkSequential(
+  institutionId: string,
+  rows: CreateSaccoUserPayload[],
+) {
+  const results: Array<{
+    index: number;
+    success: boolean;
+    error?: string;
+  }> = [];
+
+  for (let i = 0; i < rows.length; i += 1) {
+    const row = rows[i];
+    try {
+      await createSaccoUser(institutionId, row);
+      results.push({ index: i + 1, success: true });
+    } catch (err) {
+      const apiErr = err as Error;
+      results.push({
+        index: i + 1,
+        success: false,
+        error: apiErr.message || "Failed to create user",
+      });
+    }
+  }
+
+  const successCount = results.filter((r) => r.success).length;
+  return {
+    total: results.length,
+    successCount,
+    failCount: results.length - successCount,
+    results,
   };
 }
 
