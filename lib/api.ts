@@ -89,7 +89,8 @@ type UpdateSaccoUserPayload = {
 };
 
 type UpdateSaccoStaffPayload = {
-  role: "OWNER" | "ADMIN" | "OPERATOR" | "VIEWER";
+  role?: "OWNER" | "ADMIN" | "OPERATOR" | "VIEWER";
+  accountStatus?: "ACTIVE" | "INACTIVE";
   canViewTransactions?: boolean;
   canManageMembers?: boolean;
   canManageInstitution?: boolean;
