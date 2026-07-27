@@ -410,6 +410,29 @@ export default function MembersPage() {
     }
   }
 
+  async function handleStaffAccountStatusChange(
+    memberId: string,
+    accountStatus: "ACTIVE" | "INACTIVE",
+  ) {
+    if (!selectedSaccoId) return;
+    setUpdatingStaffRoleId(memberId);
+    setError("");
+    setFeedback("");
+    try {
+      await updateSaccoStaff(selectedSaccoId, memberId, { accountStatus });
+      setFeedback(
+        accountStatus === "INACTIVE"
+          ? "Staff set to inactive (cannot log in)."
+          : "Staff account activated.",
+      );
+      await loadSaccoStaff(selectedSaccoId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update staff status");
+    } finally {
+      setUpdatingStaffRoleId(null);
+    }
+  }
+
   async function handleCreateMember(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setMemberModalError("");
@@ -1229,17 +1252,24 @@ export default function MembersPage() {
                 staffRows.map((s) => {
                   const first = s.user?.profile?.firstName || "";
                   const last = s.user?.profile?.lastName || "";
-                  const badge =
-                    s.accountStatus === "PENDING_INVITATION" || String(s.status) === "PENDING_INVITATION"
-                      ? "Pending Invitation"
+                  const isPending =
+                    s.accountStatus === "PENDING_INVITATION" ||
+                    String(s.status) === "PENDING_INVITATION";
+                  const isInactive =
+                    s.accountStatus === "INACTIVE" || String(s.status) === "INACTIVE";
+                  const badge = isPending
+                    ? "Pending Invitation"
+                    : isInactive
+                      ? "Inactive"
                       : "Active";
                   const badgeClass =
                     badge === "Active"
                       ? "bg-emerald-50 text-emerald-800 ring-emerald-600/20"
-                      : "bg-amber-50 text-amber-900 ring-amber-600/20";
-                  const showResend =
-                    canManageMembers &&
-                    (s.accountStatus === "PENDING_INVITATION" || String(s.status) === "PENDING_INVITATION");
+                      : badge === "Inactive"
+                        ? "bg-slate-100 text-slate-700 ring-slate-500/20"
+                        : "bg-amber-50 text-amber-900 ring-amber-600/20";
+                  const showResend = canManageMembers && isPending;
+                  const showStatusToggle = canManageMembers && !isPending;
                   return (
                     <tr key={s.id} className={ipc.tbodyRow}>
                       <td className={ipc.td}>{`${first} ${last}`.trim() || "—"}</td>
@@ -1268,11 +1298,30 @@ export default function MembersPage() {
                         )}
                       </td>
                       <td className={ipc.td}>
-                        <span
-                          className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${badgeClass}`}
-                        >
-                          {badge}
-                        </span>
+                        <div className="flex flex-col gap-1.5">
+                          <span
+                            className={`inline-flex w-fit items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset ${badgeClass}`}
+                          >
+                            {badge}
+                          </span>
+                          {showStatusToggle ? (
+                            <select
+                              value={isInactive ? "INACTIVE" : "ACTIVE"}
+                              disabled={updatingStaffRoleId === s.id}
+                              onChange={(e) =>
+                                void handleStaffAccountStatusChange(
+                                  s.id,
+                                  e.target.value as "ACTIVE" | "INACTIVE",
+                                )
+                              }
+                              className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-800"
+                              title="Set inactive when staff is on leave"
+                            >
+                              <option value="ACTIVE">ACTIVE</option>
+                              <option value="INACTIVE">INACTIVE</option>
+                            </select>
+                          ) : null}
+                        </div>
                       </td>
                       <td className={ipc.td}>
                         {showResend ? (
