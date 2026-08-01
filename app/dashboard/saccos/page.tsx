@@ -20,11 +20,13 @@ type SaccoItem = {
 
 export default function SaccosPage() {
   const { user } = useAuth();
+  const authRole = String(user?.permissions?.role || "").toUpperCase();
   const canCreateSacco = Boolean(
     user?.scope !== "INSTITUTION" &&
       (user?.permissions?.canManageMembers ||
         user?.permissions?.canManageInstitution ||
-        user?.permissions?.role === "OWNER"),
+        authRole === "OWNER" ||
+        authRole === "ADMIN"),
   );
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   /** When inviting initial staff, step 1 = SACCO details; step 2 = staff contact & role. */

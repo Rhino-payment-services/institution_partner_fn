@@ -7,6 +7,7 @@ import { ipc } from "@/lib/dashboard-ui";
 
 type StaffItem = {
   id: string;
+  userId?: string;
   status?: string;
   accountStatus?: string;
   role?: string;
@@ -18,8 +19,11 @@ type StaffItem = {
 export default function StaffPage() {
   const { user } = useAuth();
   const isInstitutionScoped = user?.scope === "INSTITUTION";
+  const role = String(user?.permissions?.role || "").toUpperCase();
   const canManageMembers = Boolean(
-    user?.permissions?.canManageMembers || user?.permissions?.role === "OWNER",
+    user?.permissions?.canManageMembers ||
+      role === "OWNER" ||
+      role === "ADMIN",
   );
   const partnerId = user?.partner?.id;
   const canManagePartnerStaff = useMemo(
@@ -210,29 +214,42 @@ export default function StaffPage() {
                   const showResend =
                     canManagePartnerStaff &&
                     (s.accountStatus === "PENDING_INVITATION" || String(s.status) === "PENDING");
+                  const isSelf =
+                    Boolean(user?.email) &&
+                    String(s.email || "").toLowerCase() === String(user?.email || "").toLowerCase();
+                  const canEditRole = canManagePartnerStaff && !isSelf;
                   return (
                     <tr key={s.id} className={ipc.tbodyRow}>
                       <td className={ipc.td}>{`${first} ${last}`.trim() || "—"}</td>
                       <td className={ipc.td}>{s.email || "—"}</td>
                       <td className={ipc.td}>—</td>
                       <td className={ipc.td}>
-                        <select
-                          value={s.role || "VIEWER"}
-                          disabled={updatingRoleId === s.id}
-                          onChange={(e) =>
-                            void handleRoleChange(
-                              s.id,
-                              e.target.value as "OWNER" | "ADMIN" | "DEVELOPER" | "MEMBER" | "VIEWER",
-                            )
-                          }
-                          className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-800"
-                        >
-                          <option value="OWNER">OWNER</option>
-                          <option value="ADMIN">ADMIN</option>
-                          <option value="DEVELOPER">DEVELOPER</option>
-                          <option value="MEMBER">MEMBER</option>
-                          <option value="VIEWER">VIEWER</option>
-                        </select>
+                        {canEditRole ? (
+                          <select
+                            value={s.role || "VIEWER"}
+                            disabled={updatingRoleId === s.id}
+                            onChange={(e) =>
+                              void handleRoleChange(
+                                s.id,
+                                e.target.value as "OWNER" | "ADMIN" | "DEVELOPER" | "MEMBER" | "VIEWER",
+                              )
+                            }
+                            className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-800"
+                          >
+                            <option value="OWNER">OWNER</option>
+                            <option value="ADMIN">ADMIN</option>
+                            <option value="DEVELOPER">DEVELOPER</option>
+                            <option value="MEMBER">MEMBER</option>
+                            <option value="VIEWER">VIEWER</option>
+                          </select>
+                        ) : (
+                          <span className="text-sm text-slate-800">
+                            {s.role || "VIEWER"}
+                            {isSelf ? (
+                              <span className="ml-1 text-xs text-slate-500">(you)</span>
+                            ) : null}
+                          </span>
+                        )}
                       </td>
                       <td className={ipc.td}>
                         <span
