@@ -95,11 +95,20 @@ export default function MembersPage() {
   const { user } = useAuth();
   const isPartnerScope = user?.scope !== "INSTITUTION";
   const institutionId = user?.institution?.id ? String(user.institution.id) : "";
+  const authRole = String(user?.permissions?.role || "").toUpperCase();
   const canManageMembers = isPartnerScope
-    ? Boolean(user?.permissions?.canManageMembers || user?.permissions?.role === "OWNER")
+    ? Boolean(
+        user?.permissions?.canManageMembers ||
+          authRole === "OWNER" ||
+          authRole === "ADMIN",
+      )
     : Boolean(user?.permissions?.canManageMembers);
   const canManageInstitution = isPartnerScope
-    ? Boolean(user?.permissions?.canManageInstitution || user?.permissions?.role === "OWNER")
+    ? Boolean(
+        user?.permissions?.canManageInstitution ||
+          authRole === "OWNER" ||
+          authRole === "ADMIN",
+      )
     : Boolean(user?.permissions?.canManageInstitution);
   const [saccos, setSaccos] = useState<SaccoItem[]>([]);
   const [isCreateMemberModalOpen, setIsCreateMemberModalOpen] = useState(false);
