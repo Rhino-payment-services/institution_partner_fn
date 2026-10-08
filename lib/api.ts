@@ -152,8 +152,9 @@ async function authFetch(input: RequestInfo | URL, init?: RequestInit) {
   return response;
 }
 
-export async function listPartnerSaccos() {
-  const response = await authFetch(`${API_CONFIG.baseUrl}/partner-institutions`, {
+export async function listPartnerSaccos(status?: string) {
+  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+  const response = await authFetch(`${API_CONFIG.baseUrl}/partner-institutions${query}`, {
     headers: getAuthHeaders(),
   });
 
@@ -375,9 +376,110 @@ export async function createSaccoUser(institutionId: string, payload: CreateSacc
   return data;
 }
 
-export async function listSaccoUsers(institutionId: string) {
+export async function getPartnerSacco(institutionId: string) {
   const response = await authFetch(
-    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/users`,
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}`,
+    { headers: getAuthHeaders() },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to fetch SACCO");
+  return data as Record<string, unknown>;
+}
+
+export async function updatePartnerSacco(
+  institutionId: string,
+  payload: { name?: string; licenseNumber?: string | null; contact?: Record<string, unknown> },
+) {
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}`,
+    {
+      method: "PATCH",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload),
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to update SACCO");
+  return data as Record<string, unknown>;
+}
+
+export async function setSaccoStatus(
+  institutionId: string,
+  payload: { status: "ACTIVE" | "INACTIVE"; reason?: string },
+) {
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/status`,
+    {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload),
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to update SACCO status");
+  return data as Record<string, unknown>;
+}
+
+export async function deletePartnerSacco(institutionId: string, reason?: string) {
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}`,
+    {
+      method: "DELETE",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(reason ? { reason } : {}),
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to delete SACCO");
+  return data as Record<string, unknown>;
+}
+
+export async function restorePartnerSacco(institutionId: string, reason?: string) {
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/restore`,
+    {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(reason ? { reason } : {}),
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to restore SACCO");
+  return data as Record<string, unknown>;
+}
+
+export async function listSaccoAudit(
+  institutionId: string,
+  params?: { entityType?: string; entityId?: string },
+) {
+  const search = new URLSearchParams();
+  if (params?.entityType) search.set("entityType", params.entityType);
+  if (params?.entityId) search.set("entityId", params.entityId);
+  const query = search.toString() ? `?${search.toString()}` : "";
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/audit${query}`,
+    { headers: getAuthHeaders() },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to fetch audit history");
+  return data as Array<{
+    id: string;
+    entityType?: string;
+    entityId?: string;
+    action?: string;
+    previousStatus?: string | null;
+    newStatus?: string | null;
+    reason?: string | null;
+    actorEmail?: string | null;
+    actorScope?: string | null;
+    createdAt?: string;
+  }>;
+}
+
+export async function listSaccoUsers(institutionId: string, status?: string) {
+  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/users${query}`,
     {
       headers: getAuthHeaders(),
     },
@@ -426,17 +528,58 @@ export async function updateSaccoUser(
   return data;
 }
 
-export async function deleteSaccoUser(institutionId: string, memberId: string) {
+export async function deleteSaccoUser(
+  institutionId: string,
+  memberId: string,
+  reason?: string,
+) {
   const response = await authFetch(
     `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/users/${memberId}`,
     {
       method: "DELETE",
       headers: getAuthHeaders(),
+      body: JSON.stringify(reason ? { reason } : {}),
     },
   );
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data?.message || "Failed to delete SACCO member");
   return data as { success?: boolean; message?: string };
+}
+
+export async function setSaccoUserStatus(
+  institutionId: string,
+  memberId: string,
+  payload: { status: "ACTIVE" | "INACTIVE"; reason?: string },
+) {
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/users/${memberId}/status`,
+    {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload),
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to update member status");
+  return data as { success?: boolean; status?: string; message?: string };
+}
+
+export async function restoreSaccoUser(
+  institutionId: string,
+  memberId: string,
+  reason?: string,
+) {
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/users/${memberId}/restore`,
+    {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(reason ? { reason } : {}),
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to restore SACCO member");
+  return data as { success?: boolean; status?: string; message?: string };
 }
 
 export async function updateSaccoStaff(
