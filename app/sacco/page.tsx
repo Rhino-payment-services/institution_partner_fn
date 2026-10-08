@@ -40,6 +40,8 @@ export default function SaccoHomePage() {
   const [error, setError] = useState("");
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editName, setEditName] = useState("");
+  const [editCode, setEditCode] = useState("");
+  const [editExternalOrgId, setEditExternalOrgId] = useState("");
   const [editLicenseNumber, setEditLicenseNumber] = useState("");
   const [editError, setEditError] = useState("");
   const [isSavingEdit, setIsSavingEdit] = useState(false);
@@ -69,10 +71,24 @@ export default function SaccoHomePage() {
     setIsSavingEdit(true);
     setEditError("");
     try {
-      await updatePartnerSacco(institutionId, {
+      const payload: {
+        name: string;
+        licenseNumber: string | null;
+        code?: string;
+        externalOrgId?: string | null;
+      } = {
         name: editName.trim(),
         licenseNumber: editLicenseNumber.trim() || null,
-      });
+      };
+      const nextCode = editCode.trim();
+      const nextOrgId = editExternalOrgId.trim();
+      if (nextCode && nextCode !== String(sacco?.code || user?.institution?.code || "")) {
+        payload.code = nextCode;
+      }
+      if (nextOrgId !== String(sacco?.externalOrgId || "")) {
+        payload.externalOrgId = nextOrgId;
+      }
+      await updatePartnerSacco(institutionId, payload);
       setIsEditOpen(false);
       await loadData();
     } catch (err) {
@@ -131,6 +147,8 @@ export default function SaccoHomePage() {
               type="button"
               onClick={() => {
                 setEditName(String(sacco?.name || user?.institution?.name || ""));
+                setEditCode(String(sacco?.code || user?.institution?.code || ""));
+                setEditExternalOrgId(String(sacco?.externalOrgId || ""));
                 setEditLicenseNumber(String(sacco?.licenseNumber || ""));
                 setEditError("");
                 setIsEditOpen(true);
@@ -246,10 +264,12 @@ export default function SaccoHomePage() {
         open={isEditOpen}
         isSubmitting={isSavingEdit}
         error={editError}
-        code={String(sacco?.code || user?.institution?.code || "")}
-        externalOrgId={String(sacco?.externalOrgId || "")}
+        code={editCode}
+        externalOrgId={editExternalOrgId}
         name={editName}
         licenseNumber={editLicenseNumber}
+        onCodeChange={setEditCode}
+        onExternalOrgIdChange={setEditExternalOrgId}
         onNameChange={setEditName}
         onLicenseNumberChange={setEditLicenseNumber}
         onClose={() => setIsEditOpen(false)}
