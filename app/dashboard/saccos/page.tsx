@@ -69,6 +69,8 @@ export default function SaccosPage() {
   const [statusFilter, setStatusFilter] = useState<StatusTab>("");
   const [editingSacco, setEditingSacco] = useState<SaccoItem | null>(null);
   const [editName, setEditName] = useState("");
+  const [editCode, setEditCode] = useState("");
+  const [editExternalOrgId, setEditExternalOrgId] = useState("");
   const [editLicenseNumber, setEditLicenseNumber] = useState("");
   const [editError, setEditError] = useState("");
   const [isSavingEdit, setIsSavingEdit] = useState(false);
@@ -95,6 +97,8 @@ export default function SaccosPage() {
   function openEdit(sacco: SaccoItem) {
     setEditingSacco(sacco);
     setEditName(String(sacco.name || ""));
+    setEditCode(String(sacco.code || ""));
+    setEditExternalOrgId(String(sacco.externalOrgId || ""));
     setEditLicenseNumber(String(sacco.licenseNumber || ""));
     setEditError("");
   }
@@ -105,10 +109,24 @@ export default function SaccosPage() {
     setIsSavingEdit(true);
     setEditError("");
     try {
-      await updatePartnerSacco(editingSacco.id, {
+      const payload: {
+        name: string;
+        licenseNumber: string | null;
+        code?: string;
+        externalOrgId?: string | null;
+      } = {
         name: editName.trim(),
         licenseNumber: editLicenseNumber.trim() || null,
-      });
+      };
+      const nextCode = editCode.trim();
+      const nextOrgId = editExternalOrgId.trim();
+      if (nextCode && nextCode !== String(editingSacco.code || "")) {
+        payload.code = nextCode;
+      }
+      if (nextOrgId !== String(editingSacco.externalOrgId || "")) {
+        payload.externalOrgId = nextOrgId;
+      }
+      await updatePartnerSacco(editingSacco.id, payload);
       setFeedback("SACCO details updated.");
       setEditingSacco(null);
       await loadSaccos();
@@ -600,10 +618,12 @@ export default function SaccosPage() {
         open={Boolean(editingSacco)}
         isSubmitting={isSavingEdit}
         error={editError}
-        code={String(editingSacco?.code || "")}
-        externalOrgId={String(editingSacco?.externalOrgId || "")}
+        code={editCode}
+        externalOrgId={editExternalOrgId}
         name={editName}
         licenseNumber={editLicenseNumber}
+        onCodeChange={setEditCode}
+        onExternalOrgIdChange={setEditExternalOrgId}
         onNameChange={setEditName}
         onLicenseNumberChange={setEditLicenseNumber}
         onClose={() => setEditingSacco(null)}

@@ -388,7 +388,13 @@ export async function getPartnerSacco(institutionId: string) {
 
 export async function updatePartnerSacco(
   institutionId: string,
-  payload: { name?: string; licenseNumber?: string | null; contact?: Record<string, unknown> },
+  payload: {
+    name?: string;
+    code?: string;
+    externalOrgId?: string | null;
+    licenseNumber?: string | null;
+    contact?: Record<string, unknown>;
+  },
 ) {
   const response = await authFetch(
     `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}`,
@@ -658,9 +664,17 @@ export async function createSaccoUsersBulkSequential(
   };
 }
 
-export async function listSaccoTransactions(institutionId: string) {
+export async function listSaccoTransactions(
+  institutionId: string,
+  query?: { page?: number; limit?: number; memberId?: string },
+) {
+  const params = new URLSearchParams();
+  if (query?.page) params.set("page", String(query.page));
+  if (query?.limit) params.set("limit", String(query.limit));
+  if (query?.memberId) params.set("memberId", query.memberId);
+  const qs = params.toString();
   const response = await authFetch(
-    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/transactions`,
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/transactions${qs ? `?${qs}` : ""}`,
     {
       headers: getAuthHeaders(),
     },
@@ -668,7 +682,7 @@ export async function listSaccoTransactions(institutionId: string) {
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data?.message || "Failed to fetch SACCO transactions");
-  return data as {
+  const payload = (data?.data ?? data) as {
     institution?: { id?: string; name?: string; code?: string };
     total?: number;
     transactions?: Array<{
@@ -691,6 +705,18 @@ export async function listSaccoTransactions(institutionId: string) {
         } | null;
       } | null;
     }>;
+    pagination?: {
+      page?: number;
+      limit?: number;
+      total?: number;
+      totalPages?: number;
+    };
+  };
+  return {
+    institution: payload.institution,
+    total: payload.total ?? payload.pagination?.total ?? payload.transactions?.length ?? 0,
+    transactions: payload.transactions || [],
+    pagination: payload.pagination,
   };
 }
 

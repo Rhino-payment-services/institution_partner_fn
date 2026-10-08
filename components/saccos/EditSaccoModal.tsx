@@ -8,6 +8,8 @@ type Props = {
   externalOrgId: string;
   name: string;
   licenseNumber: string;
+  onCodeChange: (value: string) => void;
+  onExternalOrgIdChange: (value: string) => void;
   onNameChange: (value: string) => void;
   onLicenseNumberChange: (value: string) => void;
   onClose: () => void;
@@ -22,6 +24,8 @@ export function EditSaccoModal({
   externalOrgId,
   name,
   licenseNumber,
+  onCodeChange,
+  onExternalOrgIdChange,
   onNameChange,
   onLicenseNumberChange,
   onClose,
@@ -51,7 +55,8 @@ export function EditSaccoModal({
                 Edit SACCO details
               </h3>
               <p className="mt-1.5 text-sm leading-relaxed text-slate-600">
-                Code and external org ID cannot be changed because staff login and routing depend on them.
+                Changing the SACCO code or external org ID affects staff login, USSD routing, and Nexen
+                integration. Use a unique code and org ID for this partner.
               </p>
             </div>
             <button type="button" onClick={onClose} className={ipc.modalClose} disabled={isSubmitting}>
@@ -67,15 +72,29 @@ export function EditSaccoModal({
               </p>
             ) : null}
             <div>
-              <label className={ipc.formLabel}>SACCO code</label>
-              <input value={code || "—"} disabled className={`${ipc.input} mt-1.5 bg-slate-100 text-slate-600`} />
+              <label htmlFor="edit-sacco-code" className={ipc.formLabel}>
+                SACCO code
+              </label>
+              <input
+                id="edit-sacco-code"
+                value={code}
+                onChange={(e) => onCodeChange(e.target.value.replace(/\s+/g, "").toUpperCase())}
+                className={`${ipc.input} mt-1.5`}
+                minLength={2}
+                maxLength={50}
+                required
+              />
             </div>
             <div>
-              <label className={ipc.formLabel}>External org ID</label>
+              <label htmlFor="edit-sacco-org" className={ipc.formLabel}>
+                External org ID
+              </label>
               <input
-                value={externalOrgId || "—"}
-                disabled
-                className={`${ipc.input} mt-1.5 bg-slate-100 text-slate-600`}
+                id="edit-sacco-org"
+                value={externalOrgId}
+                onChange={(e) => onExternalOrgIdChange(e.target.value.trimStart())}
+                className={`${ipc.input} mt-1.5`}
+                maxLength={100}
               />
             </div>
             <div>

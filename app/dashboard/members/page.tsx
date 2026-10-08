@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createSaccoStaff,
@@ -1230,6 +1231,14 @@ export default function MembersPage() {
                       </td>
                       <td className={ipc.td}>
                         <div className="flex flex-wrap gap-2">
+                          {selectedSaccoId ? (
+                            <Link
+                              href={`/dashboard/saccos/${selectedSaccoId}/members/${row.id}`}
+                              className="text-sm font-medium text-[var(--rukapay-primary)] hover:underline"
+                            >
+                              View
+                            </Link>
+                          ) : null}
                           {String(row.status || "").toUpperCase() !== "DELETED" ? (
                             <button
                               type="button"

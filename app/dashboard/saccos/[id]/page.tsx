@@ -19,6 +19,11 @@ import { ConfirmActionModal } from "@/components/common/ConfirmActionModal";
 import { StatusBadge } from "@/components/common/StatusBadge";
 import { EditSaccoModal } from "@/components/saccos/EditSaccoModal";
 import { DELETED_RECORD_COPY, SaccoLifecycleActions } from "@/components/saccos/SaccoLifecycleActions";
+import {
+  TransactionsTable,
+  type SaccoTransaction,
+  type TransactionPagination,
+} from "@/components/transactions/TransactionsTable";
 
 type SaccoItem = {
   id: string;
@@ -59,6 +64,8 @@ type AuditRow = {
 
 type PendingSaccoAction = "inactive" | "active" | "delete" | "restore" | null;
 
+const TX_PAGE_SIZE = 50;
+
 type MemberItem = {
   id: string;
   accountNo?: string | null;
@@ -90,6 +97,8 @@ export default function SaccoDetailPage() {
   const [isLoadingAudit, setIsLoadingAudit] = useState(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editName, setEditName] = useState("");
+  const [editCode, setEditCode] = useState("");
+  const [editExternalOrgId, setEditExternalOrgId] = useState("");
   const [editLicenseNumber, setEditLicenseNumber] = useState("");
   const [editError, setEditError] = useState("");
   const [isSavingEdit, setIsSavingEdit] = useState(false);
@@ -97,49 +106,10 @@ export default function SaccoDetailPage() {
   const [actionReason, setActionReason] = useState("");
   const [actionError, setActionError] = useState("");
   const [isSubmittingAction, setIsSubmittingAction] = useState(false);
-  const [transactions, setTransactions] = useState<
-    Array<{
-      id: string;
-      reference?: string | null;
-      type?: string | null;
-      status?: string | null;
-      amount?: number | string | null;
-      currency?: string | null;
-      description?: string | null;
-      metadata?: Record<string, unknown> | null;
-      createdAt?: string | null;
-      user?: {
-        id?: string | null;
-        email?: string | null;
-        phone?: string | null;
-        profile?: {
-          firstName?: string | null;
-          lastName?: string | null;
-        } | null;
-      } | null;
-    }>
-  >([]);
-  const [selectedTransaction, setSelectedTransaction] = useState<{
-    id: string;
-    reference?: string | null;
-    type?: string | null;
-    status?: string | null;
-    amount?: number | string | null;
-    currency?: string | null;
-    description?: string | null;
-    metadata?: Record<string, unknown> | null;
-    createdAt?: string | null;
-    user?: {
-      id?: string | null;
-      email?: string | null;
-      phone?: string | null;
-      profile?: {
-        firstName?: string | null;
-        lastName?: string | null;
-      } | null;
-    } | null;
-  } | null>(null);
+  const [transactions, setTransactions] = useState<SaccoTransaction[]>([]);
+  const [txPagination, setTxPagination] = useState<TransactionPagination | null>(null);
   const [isLoadingTransactions, setIsLoadingTransactions] = useState(false);
+  const [isLoadingMoreTransactions, setIsLoadingMoreTransactions] = useState(false);
   const [members, setMembers] = useState<MemberItem[]>([]);
   const [isLoadingMembers, setIsLoadingMembers] = useState(false);
   const [error, setError] = useState("");
@@ -190,15 +160,20 @@ export default function SaccoDetailPage() {
     }
   }
 
-  async function loadTransactions(institutionId: string) {
-    setIsLoadingTransactions(true);
+  async function loadTransactions(institutionId: string, page = 1, append = false) {
+    if (append) setIsLoadingMoreTransactions(true);
+    else setIsLoadingTransactions(true);
     try {
-      const data = await listSaccoTransactions(institutionId);
-      setTransactions(data.transactions || []);
+      const data = await listSaccoTransactions(institutionId, { page, limit: TX_PAGE_SIZE });
+      setTransactions((current) =>
+        append ? [...current, ...(data.transactions || [])] : data.transactions || [],
+      );
+      setTxPagination(data.pagination || null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load SACCO transactions");
     } finally {
       setIsLoadingTransactions(false);
+      setIsLoadingMoreTransactions(false);
     }
   }
 
@@ -211,6 +186,8 @@ export default function SaccoDetailPage() {
   function openEdit() {
     if (!sacco) return;
     setEditName(String(sacco.name || ""));
+    setEditCode(String(sacco.code || ""));
+    setEditExternalOrgId(String(sacco.externalOrgId || ""));
     setEditLicenseNumber(String(sacco.licenseNumber || ""));
     setEditError("");
     setIsEditOpen(true);
@@ -218,14 +195,28 @@ export default function SaccoDetailPage() {
 
   async function handleSaveEdit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!saccoId) return;
+    if (!saccoId || !sacco) return;
     setIsSavingEdit(true);
     setEditError("");
     try {
-      await updatePartnerSacco(String(saccoId), {
+      const payload: {
+        name: string;
+        licenseNumber: string | null;
+        code?: string;
+        externalOrgId?: string | null;
+      } = {
         name: editName.trim(),
         licenseNumber: editLicenseNumber.trim() || null,
-      });
+      };
+      const nextCode = editCode.trim();
+      const nextOrgId = editExternalOrgId.trim();
+      if (nextCode && nextCode !== String(sacco.code || "")) {
+        payload.code = nextCode;
+      }
+      if (nextOrgId !== String(sacco.externalOrgId || "")) {
+        payload.externalOrgId = nextOrgId;
+      }
+      await updatePartnerSacco(String(saccoId), payload);
       setIsEditOpen(false);
       await loadSacco(String(saccoId));
       await loadAudit(String(saccoId));
@@ -258,58 +249,6 @@ export default function SaccoDetailPage() {
     } finally {
       setIsSubmittingAction(false);
     }
-  }
-
-  function getTransactionMemberName(tx: {
-    user?: {
-      email?: string | null;
-      phone?: string | null;
-      profile?: { firstName?: string | null; lastName?: string | null } | null;
-    } | null;
-    metadata?: Record<string, unknown> | null;
-  }) {
-    const first = tx.user?.profile?.firstName?.trim() || "";
-    const last = tx.user?.profile?.lastName?.trim() || "";
-    const full = `${first} ${last}`.trim();
-    if (full) return full;
-
-    const metadataName = String((tx.metadata?.nexenMemberName as string) || "").trim();
-    if (metadataName) return metadataName;
-
-    if (tx.user?.phone) return tx.user.phone;
-    if (tx.user?.email) return tx.user.email;
-    return "-";
-  }
-
-  function getTransactionActionLabel(tx: {
-    type?: string | null;
-    metadata?: Record<string, unknown> | null;
-  }) {
-    const flowType = String((tx.metadata?.flowType as string) || "").toUpperCase();
-    const nexenAction = String((tx.metadata?.nexenAction as string) || "").toUpperCase();
-    const description = String((tx.metadata?.description as string) || "").toUpperCase();
-
-    if (flowType.includes("NEXEN")) {
-      if (flowType.includes("SAVINGS")) {
-        if (nexenAction === "DEPOSIT") return "Saving Deposit";
-        if (nexenAction === "WITHDRAW") return "Savings Withdraw";
-        return "Savings";
-      }
-      if (flowType.includes("SHARE")) {
-        if (nexenAction === "PURCHASE" || description.includes("BUY")) return "Buy Shares";
-        if (nexenAction === "WITHDRAW") return "Withdraw Shares";
-        return "Shares";
-      }
-      if (flowType.includes("LOAN")) {
-        if (nexenAction === "REPAY") return "Loan Repayment";
-        if (nexenAction === "CREATE") return "Loan Disbursement";
-        return "Loan";
-      }
-    }
-
-    if (tx.type === "MNO_TO_WALLET") return "Collection";
-    if (tx.type === "WALLET_TO_MNO") return "Payout";
-    return tx.type || "-";
   }
 
   return (
@@ -415,18 +354,19 @@ export default function SaccoDetailPage() {
                 <th className={ipc.th}>Account no</th>
                 <th className={ipc.th}>Client ID</th>
                 <th className={ipc.th}>Status</th>
+                <th className={`${ipc.th} text-right`}>View</th>
               </tr>
             </thead>
             <tbody>
               {isLoadingMembers ? (
                 <tr>
-                  <td className={`${ipc.td} text-slate-600`} colSpan={7}>
+                  <td className={`${ipc.td} text-slate-600`} colSpan={8}>
                     Loading members…
                   </td>
                 </tr>
               ) : members.length === 0 ? (
                 <tr>
-                  <td className={`${ipc.td} text-slate-600`} colSpan={7}>
+                  <td className={`${ipc.td} text-slate-600`} colSpan={8}>
                     No members found for this SACCO.
                   </td>
                 </tr>
@@ -438,7 +378,14 @@ export default function SaccoDetailPage() {
                   const displayName = member.displayName?.trim() || legalName;
                   return (
                     <tr key={member.id} className={ipc.tbodyRow}>
-                      <td className={`${ipc.td} font-medium`}>{displayName}</td>
+                      <td className={`${ipc.td} font-medium`}>
+                        <Link
+                          href={`/dashboard/saccos/${saccoId}/members/${member.id}`}
+                          className={ipc.link}
+                        >
+                          {displayName}
+                        </Link>
+                      </td>
                       <td className={ipc.td}>{legalName}</td>
                       <td className={ipc.td}>{member.user?.phone || "—"}</td>
                       <td className={ipc.td}>{member.user?.email || "—"}</td>
@@ -446,6 +393,14 @@ export default function SaccoDetailPage() {
                       <td className={ipc.td}>{member.clientId || "—"}</td>
                       <td className={ipc.td}>
                         <StatusBadge status={member.status} />
+                      </td>
+                      <td className={`${ipc.td} text-right`}>
+                        <Link
+                          href={`/dashboard/saccos/${saccoId}/members/${member.id}`}
+                          className={ipc.link}
+                        >
+                          View
+                        </Link>
                       </td>
                     </tr>
                   );
@@ -459,109 +414,23 @@ export default function SaccoDetailPage() {
       <section className={`${ipc.card} ${ipc.cardPad}`}>
         <h3 className="text-lg font-semibold tracking-tight text-slate-900">Transactions</h3>
         <p className="mt-1 text-sm leading-relaxed text-slate-600">
-          Latest transactions for this SACCO settlement wallet.
+          Latest transactions for this SACCO, including member activity.
         </p>
-
-        <div className={`mt-4 ${ipc.tableWrap}`}>
-          <table className={ipc.table}>
-            <thead>
-              <tr className={ipc.theadRow}>
-                <th className={ipc.th}>Date</th>
-                <th className={ipc.th}>Reference</th>
-                <th className={ipc.th}>Member</th>
-                <th className={ipc.th}>Action</th>
-                <th className={ipc.th}>Amount</th>
-                <th className={ipc.th}>Status</th>
-                <th className={`${ipc.th} text-right`}>View</th>
-              </tr>
-            </thead>
-            <tbody>
-              {isLoadingTransactions ? (
-                <tr>
-                  <td className={`${ipc.td} text-slate-600`} colSpan={7}>
-                    Loading transactions…
-                  </td>
-                </tr>
-              ) : transactions.length === 0 ? (
-                <tr>
-                  <td className={`${ipc.td} text-slate-600`} colSpan={7}>
-                    No transactions available yet for this SACCO.
-                  </td>
-                </tr>
-              ) : (
-                transactions.map((tx) => (
-                  <tr key={tx.id} className={ipc.tbodyRow}>
-                    <td className={ipc.td}>
-                      {tx.createdAt ? new Date(tx.createdAt).toLocaleString() : "—"}
-                    </td>
-                    <td className={ipc.td}>{tx.reference || "—"}</td>
-                    <td className={ipc.td}>{getTransactionMemberName(tx)}</td>
-                    <td className={ipc.td}>{getTransactionActionLabel(tx)}</td>
-                    <td className={ipc.tdNum}>
-                      {`${tx.currency || "UGX"} ${Number(tx.amount || 0).toLocaleString()}`}
-                    </td>
-                    <td className={ipc.td}>
-                      <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-800">
-                        {tx.status || "—"}
-                      </span>
-                    </td>
-                    <td className={`${ipc.td} text-right`}>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedTransaction(tx)}
-                        className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 shadow-sm transition hover:bg-slate-50"
-                        title="View transaction details"
-                      >
-                        Details
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+        <div className="mt-4">
+          <TransactionsTable
+            transactions={transactions}
+            isLoading={isLoadingTransactions}
+            emptyMessage="No transactions available yet for this SACCO."
+            pagination={txPagination}
+            isLoadingMore={isLoadingMoreTransactions}
+            onLoadMore={
+              saccoId
+                ? () => void loadTransactions(String(saccoId), (txPagination?.page || 1) + 1, true)
+                : undefined
+            }
+          />
         </div>
       </section>
-      {selectedTransaction && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-[2px]">
-          <div className={`w-full max-w-2xl ${ipc.card} p-5 shadow-xl`}>
-            <div className="mb-4 flex items-center justify-between">
-              <h4 className="text-base font-semibold text-slate-900">Transaction Details</h4>
-              <button
-                type="button"
-                onClick={() => setSelectedTransaction(null)}
-                className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
-              >
-                Close
-              </button>
-            </div>
-            <div className="grid grid-cols-1 gap-2 text-sm text-slate-700">
-              <p><span className="font-medium">Reference:</span> {selectedTransaction.reference || "-"}</p>
-              <p><span className="font-medium">Member:</span> {getTransactionMemberName(selectedTransaction)}</p>
-              <p><span className="font-medium">Action:</span> {getTransactionActionLabel(selectedTransaction)}</p>
-              <p><span className="font-medium">Type:</span> {selectedTransaction.type || "-"}</p>
-              <p>
-                <span className="font-medium">Amount:</span>{" "}
-                {`${selectedTransaction.currency || "UGX"} ${Number(selectedTransaction.amount || 0).toLocaleString()}`}
-              </p>
-              <p><span className="font-medium">Status:</span> {selectedTransaction.status || "-"}</p>
-              <p>
-                <span className="font-medium">Date:</span>{" "}
-                {selectedTransaction.createdAt
-                  ? new Date(selectedTransaction.createdAt).toLocaleString()
-                  : "-"}
-              </p>
-              <p><span className="font-medium">Description:</span> {selectedTransaction.description || "-"}</p>
-            </div>
-            <div className="mt-4 rounded border border-slate-200 bg-slate-50 p-3">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-600">Metadata</p>
-              <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs text-slate-700">
-                {JSON.stringify(selectedTransaction.metadata || {}, null, 2)}
-              </pre>
-            </div>
-          </div>
-        </div>
-      )}
 
       {canManageInstitution ? (
         <section className={`${ipc.card} ${ipc.cardPad}`}>
@@ -618,10 +487,12 @@ export default function SaccoDetailPage() {
         open={isEditOpen}
         isSubmitting={isSavingEdit}
         error={editError}
-        code={String(sacco?.code || "")}
-        externalOrgId={String(sacco?.externalOrgId || "")}
+        code={editCode}
+        externalOrgId={editExternalOrgId}
         name={editName}
         licenseNumber={editLicenseNumber}
+        onCodeChange={setEditCode}
+        onExternalOrgIdChange={setEditExternalOrgId}
         onNameChange={setEditName}
         onLicenseNumberChange={setEditLicenseNumber}
         onClose={() => setIsEditOpen(false)}

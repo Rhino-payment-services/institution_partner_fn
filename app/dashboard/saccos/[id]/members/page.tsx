@@ -90,12 +90,13 @@ export default function SaccoMembersPage() {
                 <th className={ipc.th}>Account no</th>
                 <th className={ipc.th}>Client ID</th>
                 <th className={ipc.th}>Status</th>
+                <th className={`${ipc.th} text-right`}>View</th>
               </tr>
             </thead>
             <tbody>
               {!loading && members.length === 0 && (
                 <tr>
-                  <td className={`${ipc.td} text-slate-600`} colSpan={7}>
+                  <td className={`${ipc.td} text-slate-600`} colSpan={8}>
                     No members found for this SACCO.
                   </td>
                 </tr>
@@ -107,7 +108,14 @@ export default function SaccoMembersPage() {
                 const displayName = member.displayName?.trim() || legalName;
                 return (
                   <tr key={member.id} className={ipc.tbodyRow}>
-                    <td className={`${ipc.td} font-medium`}>{displayName}</td>
+                    <td className={`${ipc.td} font-medium`}>
+                      <Link
+                        href={`/dashboard/saccos/${saccoId}/members/${member.id}`}
+                        className={ipc.link}
+                      >
+                        {displayName}
+                      </Link>
+                    </td>
                     <td className={ipc.td}>{legalName}</td>
                     <td className={ipc.td}>{member.user?.phone || "—"}</td>
                     <td className={ipc.td}>{member.user?.email || "—"}</td>
@@ -117,6 +125,14 @@ export default function SaccoMembersPage() {
                       <span className={institutionStatusBadgeClass(member.status)}>
                         {member.status || "—"}
                       </span>
+                    </td>
+                    <td className={`${ipc.td} text-right`}>
+                      <Link
+                        href={`/dashboard/saccos/${saccoId}/members/${member.id}`}
+                        className={ipc.link}
+                      >
+                        View
+                      </Link>
                     </td>
                   </tr>
                 );
