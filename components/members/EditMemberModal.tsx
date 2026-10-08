@@ -29,14 +29,12 @@ type Props = {
   email: string;
   accountNo: string;
   clientId: string;
-  status: string;
   onClose: () => void;
   onSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
   onDisplayNameChange: (v: string) => void;
   onEmailChange: (v: string) => void;
   onAccountNoChange: (v: string) => void;
   onClientIdChange: (v: string) => void;
-  onStatusChange: (v: string) => void;
 };
 
 export function EditMemberModal({
@@ -48,14 +46,12 @@ export function EditMemberModal({
   email,
   accountNo,
   clientId,
-  status,
   onClose,
   onSubmit,
   onDisplayNameChange,
   onEmailChange,
   onAccountNoChange,
   onClientIdChange,
-  onStatusChange,
 }: Props) {
   if (!open || !member) return null;
 
@@ -172,21 +168,6 @@ export function EditMemberModal({
                   className={`${ipc.input} mt-1.5`}
                 />
               </div>
-            </div>
-            <div>
-              <label htmlFor="edit-status" className={ipc.formLabel}>
-                Status
-              </label>
-              <select
-                id="edit-status"
-                value={status}
-                onChange={(e) => onStatusChange(e.target.value)}
-                className={`${ipc.input} mt-1.5`}
-              >
-                <option value="ACTIVE">ACTIVE</option>
-                <option value="INACTIVE">INACTIVE</option>
-                <option value="SUSPENDED">SUSPENDED</option>
-              </select>
             </div>
           </div>
           <div className={ipc.modalFooter}>

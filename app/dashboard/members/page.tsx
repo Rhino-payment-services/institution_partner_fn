@@ -11,6 +11,8 @@ import {
   listSaccoStaff,
   listSaccoUsers,
   resendSaccoStaffInvitation,
+  restoreSaccoUser,
+  setSaccoUserStatus,
   updateSaccoStaff,
   updateSaccoUser,
   updateSaccoWithdrawalSettings,
@@ -19,6 +21,10 @@ import {
 import { CreateMemberModal } from "@/components/members/CreateMemberModal";
 import { CreateStaffModal } from "@/components/members/CreateStaffModal";
 import { EditMemberModal, type SaccoCustomerMember } from "@/components/members/EditMemberModal";
+import { ConfirmActionModal } from "@/components/common/ConfirmActionModal";
+import { StatusBadge } from "@/components/common/StatusBadge";
+import { StatusFilterTabs, type StatusTab } from "@/components/common/StatusFilterTabs";
+import { DELETED_RECORD_COPY } from "@/components/saccos/SaccoLifecycleActions";
 import type { MemberFormErrors } from "@/components/members/member-form-types";
 import {
   isNationalIdNotApplicableValue,
@@ -27,6 +33,8 @@ import {
 } from "@/lib/member-validation";
 import { useAuth } from "@/lib/auth-context";
 import { ipc } from "@/lib/dashboard-ui";
+
+type PendingMemberAction = "inactive" | "active" | "delete" | "restore" | null;
 
 type SaccoItem = {
   id: string;
@@ -148,10 +156,14 @@ export default function MembersPage() {
   const [editEmail, setEditEmail] = useState("");
   const [editAccountNo, setEditAccountNo] = useState("");
   const [editClientId, setEditClientId] = useState("");
-  const [editStatus, setEditStatus] = useState("ACTIVE");
   const [editModalError, setEditModalError] = useState("");
   const [isSavingMemberEdit, setIsSavingMemberEdit] = useState(false);
-  const [deletingMemberId, setDeletingMemberId] = useState<string | null>(null);
+  const [memberStatusFilter, setMemberStatusFilter] = useState<StatusTab>("");
+  const [pendingMemberAction, setPendingMemberAction] = useState<PendingMemberAction>(null);
+  const [pendingMember, setPendingMember] = useState<SaccoCustomerMember | null>(null);
+  const [memberActionReason, setMemberActionReason] = useState("");
+  const [memberActionError, setMemberActionError] = useState("");
+  const [isSubmittingMemberAction, setIsSubmittingMemberAction] = useState(false);
   const [updatingStaffRoleId, setUpdatingStaffRoleId] = useState<string | null>(null);
   const [staffRows, setStaffRows] = useState<StaffItem[]>([]);
   const [staffEmail, setStaffEmail] = useState("");
@@ -269,7 +281,7 @@ export default function MembersPage() {
     }
     void loadSaccoStaff(selectedSaccoId);
     void loadSaccoCustomers(selectedSaccoId);
-  }, [selectedSaccoId]);
+  }, [selectedSaccoId, memberStatusFilter]);
 
   useEffect(() => {
     const md = selectedSacco?.metadata;
@@ -301,7 +313,7 @@ export default function MembersPage() {
   async function loadSaccoCustomers(institutionId: string) {
     setIsLoadingCustomers(true);
     try {
-      const data = await listSaccoUsers(institutionId);
+      const data = await listSaccoUsers(institutionId, memberStatusFilter || undefined);
       setCustomerRows((data?.members || []) as SaccoCustomerMember[]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load SACCO customers");
@@ -355,7 +367,6 @@ export default function MembersPage() {
     setEditEmail(member.user?.email || "");
     setEditAccountNo(member.accountNo || "");
     setEditClientId(member.clientId || "");
-    setEditStatus(member.status || "ACTIVE");
     setEditModalError("");
   }
 
@@ -370,7 +381,6 @@ export default function MembersPage() {
         email: editEmail.trim() || undefined,
         accountNo: editAccountNo.trim() || undefined,
         clientId: editClientId.trim() || undefined,
-        status: editStatus,
       });
       setFeedback("Member updated successfully.");
       setEditingMember(null);
@@ -383,21 +393,45 @@ export default function MembersPage() {
     }
   }
 
-  async function handleDeleteMember(memberId: string) {
-    if (!selectedSaccoId) return;
-    if (!window.confirm("Remove this member from the SACCO? This cannot be undone.")) return;
-    setError("");
-    setFeedback("");
-    setDeletingMemberId(memberId);
+  function openMemberAction(member: SaccoCustomerMember, action: PendingMemberAction) {
+    setPendingMember(member);
+    setPendingMemberAction(action);
+    setMemberActionReason("");
+    setMemberActionError("");
+  }
+
+  async function handleConfirmMemberAction() {
+    if (!selectedSaccoId || !pendingMember || !pendingMemberAction) return;
+    setIsSubmittingMemberAction(true);
+    setMemberActionError("");
     try {
-      await deleteSaccoUser(selectedSaccoId, memberId);
-      setFeedback("Member removed successfully.");
+      if (pendingMemberAction === "inactive") {
+        await setSaccoUserStatus(selectedSaccoId, pendingMember.id, {
+          status: "INACTIVE",
+          reason: memberActionReason.trim() || undefined,
+        });
+        setFeedback("Member marked inactive.");
+      } else if (pendingMemberAction === "active") {
+        await setSaccoUserStatus(selectedSaccoId, pendingMember.id, {
+          status: "ACTIVE",
+          reason: memberActionReason.trim() || undefined,
+        });
+        setFeedback("Member marked active.");
+      } else if (pendingMemberAction === "delete") {
+        await deleteSaccoUser(selectedSaccoId, pendingMember.id, memberActionReason.trim() || undefined);
+        setFeedback("Member marked as deleted. History is preserved.");
+      } else if (pendingMemberAction === "restore") {
+        await restoreSaccoUser(selectedSaccoId, pendingMember.id, memberActionReason.trim() || undefined);
+        setFeedback("Member restored to inactive.");
+      }
+      setPendingMemberAction(null);
+      setPendingMember(null);
       await loadSaccoCustomers(selectedSaccoId);
       await loadSaccos();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to delete member");
+      setMemberActionError(err instanceof Error ? err.message : "Failed to update member");
     } finally {
-      setDeletingMemberId(null);
+      setIsSubmittingMemberAction(false);
     }
   }
 
@@ -1131,6 +1165,9 @@ export default function MembersPage() {
           </div>
         </div>
         <div className="mt-4">
+          <StatusFilterTabs value={memberStatusFilter} onChange={setMemberStatusFilter} />
+        </div>
+        <div className="mt-4">
           <input
             type="search"
             value={customerSearch}
@@ -1188,24 +1225,57 @@ export default function MembersPage() {
                       <td className={ipc.td}>{row.user?.profile?.nationalId || "N/A"}</td>
                       <td className={ipc.td}>{row.accountNo || "—"}</td>
                       <td className={ipc.td}>{row.clientId || "—"}</td>
-                      <td className={ipc.td}>{row.status || "—"}</td>
+                      <td className={ipc.td}>
+                        <StatusBadge status={row.status} />
+                      </td>
                       <td className={ipc.td}>
                         <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={() => openEditMember(row)}
-                            className="text-sm font-medium text-[var(--rukapay-primary)] hover:underline"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void handleDeleteMember(row.id)}
-                            disabled={deletingMemberId === row.id}
-                            className="text-sm font-medium text-red-700 hover:underline disabled:opacity-50"
-                          >
-                            {deletingMemberId === row.id ? "Deleting…" : "Delete"}
-                          </button>
+                          {String(row.status || "").toUpperCase() !== "DELETED" ? (
+                            <button
+                              type="button"
+                              onClick={() => openEditMember(row)}
+                              disabled={!canManageMembers}
+                              className="text-sm font-medium text-[var(--rukapay-primary)] hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              Edit
+                            </button>
+                          ) : null}
+                          {canManageMembers && String(row.status || "").toUpperCase() === "ACTIVE" ? (
+                            <button
+                              type="button"
+                              onClick={() => openMemberAction(row, "inactive")}
+                              className="text-sm font-medium text-[var(--rukapay-primary)] hover:underline"
+                            >
+                              Make Inactive
+                            </button>
+                          ) : null}
+                          {canManageMembers && String(row.status || "").toUpperCase() === "INACTIVE" ? (
+                            <button
+                              type="button"
+                              onClick={() => openMemberAction(row, "active")}
+                              className="text-sm font-medium text-[var(--rukapay-primary)] hover:underline"
+                            >
+                              Make Active
+                            </button>
+                          ) : null}
+                          {canManageMembers && String(row.status || "").toUpperCase() === "DELETED" ? (
+                            <button
+                              type="button"
+                              onClick={() => openMemberAction(row, "restore")}
+                              className="text-sm font-medium text-[var(--rukapay-primary)] hover:underline"
+                            >
+                              Restore
+                            </button>
+                          ) : null}
+                          {canManageMembers && String(row.status || "").toUpperCase() !== "DELETED" ? (
+                            <button
+                              type="button"
+                              onClick={() => openMemberAction(row, "delete")}
+                              className="text-sm font-medium text-red-700 hover:underline"
+                            >
+                              Delete
+                            </button>
+                          ) : null}
                         </div>
                       </td>
                     </tr>
@@ -1666,14 +1736,53 @@ export default function MembersPage() {
         email={editEmail}
         accountNo={editAccountNo}
         clientId={editClientId}
-        status={editStatus}
         onClose={() => setEditingMember(null)}
         onSubmit={handleSaveMemberEdit}
         onDisplayNameChange={setEditDisplayName}
         onEmailChange={setEditEmail}
         onAccountNoChange={setEditAccountNo}
         onClientIdChange={setEditClientId}
-        onStatusChange={setEditStatus}
+      />
+
+      <ConfirmActionModal
+        open={Boolean(pendingMemberAction && pendingMember)}
+        title={
+          pendingMemberAction === "delete"
+            ? "Delete member"
+            : pendingMemberAction === "restore"
+              ? "Restore member"
+              : pendingMemberAction === "inactive"
+                ? "Make member inactive"
+                : "Make member active"
+        }
+        explanation={
+          pendingMemberAction === "delete"
+            ? DELETED_RECORD_COPY
+            : pendingMemberAction === "restore"
+              ? "This restores the member to INACTIVE if no live member in this SACCO already uses the same user or account number."
+              : pendingMemberAction === "inactive"
+                ? "The member stays in the SACCO with all balances, accounts and history linked to this ID."
+                : "The member will be able to transact again under this membership ID."
+        }
+        confirmLabel={
+          pendingMemberAction === "delete"
+            ? "Delete"
+            : pendingMemberAction === "restore"
+              ? "Restore"
+              : pendingMemberAction === "inactive"
+                ? "Make Inactive"
+                : "Make Active"
+        }
+        danger={pendingMemberAction === "delete"}
+        reason={memberActionReason}
+        isSubmitting={isSubmittingMemberAction}
+        error={memberActionError}
+        onReasonChange={setMemberActionReason}
+        onClose={() => {
+          setPendingMemberAction(null);
+          setPendingMember(null);
+        }}
+        onConfirm={() => void handleConfirmMemberAction()}
       />
 
         </>
