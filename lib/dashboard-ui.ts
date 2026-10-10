@@ -54,6 +54,8 @@ export const ipc = {
     "inline-flex items-center rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-900 ring-1 ring-amber-200/70",
   badgeNeutral:
     "inline-flex items-center rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-800 ring-1 ring-slate-200/80",
+  badgeDanger:
+    "inline-flex items-center rounded-full bg-red-50 px-2.5 py-0.5 text-xs font-medium text-red-800 ring-1 ring-red-200/70",
   statCard:
     "relative overflow-hidden rounded-xl border border-slate-200/90 bg-white p-5 shadow-sm shadow-slate-900/[0.04] before:absolute before:left-0 before:top-0 before:h-full before:w-1 before:rounded-l-xl before:bg-[var(--rukapay-primary)]",
 } as const;
@@ -64,4 +66,22 @@ export function institutionStatusBadgeClass(status: string | undefined | null): 
   if (s === "ACTIVE") return ipc.badgeSuccess;
   if (s.includes("PENDING")) return ipc.badgeWarning;
   return ipc.badgeNeutral;
+}
+
+export function recordStatusBadgeClass(status: string | undefined | null): string {
+  const s = String(status || "").toUpperCase();
+  if (s === "ACTIVE") return ipc.badgeSuccess;
+  if (s === "INACTIVE") return ipc.badgeWarning;
+  if (s === "DELETED") return ipc.badgeDanger;
+  if (s.includes("PENDING")) return ipc.badgeWarning;
+  return ipc.badgeNeutral;
+}
+
+export function recordStatusLabel(status: string | undefined | null): string {
+  const s = String(status || "").trim().toUpperCase();
+  if (s === "ACTIVE") return "Active";
+  if (s === "INACTIVE") return "Inactive";
+  if (s === "DELETED") return "Deleted";
+  if (s === "PENDING_INVITATION") return "Pending invitation";
+  return s || "Unknown";
 }

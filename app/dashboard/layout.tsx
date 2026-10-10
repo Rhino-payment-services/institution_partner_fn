@@ -95,9 +95,20 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const initials = useMemo(() => getInitials(displayName), [displayName]);
   const displayedNavItems = useMemo(() => {
     const perms = user?.permissions || {};
+    const role = String(perms.role || "").toUpperCase();
+    const isPartnerAdmin = role === "OWNER" || role === "ADMIN";
     return navItems.filter((item) => {
       if (!("permission" in item) || !item.permission) return true;
-      return Boolean((perms as Record<string, unknown>)[item.permission]);
+      const key = item.permission;
+      if (Boolean((perms as Record<string, unknown>)[key])) return true;
+      // Role label can grant manage access when JWT flags were not refreshed yet
+      if (
+        isPartnerAdmin &&
+        (key === "canManageMembers" || key === "canRequestLiquidation")
+      ) {
+        return true;
+      }
+      return false;
     });
   }, [user?.permissions]);
 

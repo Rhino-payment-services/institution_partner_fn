@@ -1,15 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { listPartnerSaccos, listSaccoTransactions } from "@/lib/api";
+import { getPartnerSacco, listSaccoTransactions, updatePartnerSacco } from "@/lib/api";
 import { ipc } from "@/lib/dashboard-ui";
+import { StatusBadge } from "@/components/common/StatusBadge";
+import { EditSaccoModal } from "@/components/saccos/EditSaccoModal";
 
 type SaccoSummary = {
   id: string;
   code?: string;
   name?: string;
+  licenseNumber?: string | null;
+  externalOrgId?: string | null;
   status?: string;
   totalCollectedBalance?: number;
   balanceCurrency?: string;
@@ -34,20 +38,24 @@ export default function SaccoHomePage() {
   const [transactions, setTransactions] = useState<SaccoTx[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editCode, setEditCode] = useState("");
+  const [editExternalOrgId, setEditExternalOrgId] = useState("");
+  const [editLicenseNumber, setEditLicenseNumber] = useState("");
+  const [editError, setEditError] = useState("");
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const canEditSacco = Boolean(user?.permissions?.canManageInstitution);
 
   const loadData = useCallback(async () => {
     if (!institutionId) return;
     setLoading(true);
     setError("");
     try {
-      const [allSaccos, txRes] = await Promise.all([
-        listPartnerSaccos() as Promise<SaccoSummary[]>,
+      const [ownSacco, txRes] = await Promise.all([
+        getPartnerSacco(institutionId) as Promise<SaccoSummary>,
         listSaccoTransactions(institutionId),
       ]);
-      const ownSacco =
-        (Array.isArray(allSaccos)
-          ? allSaccos.find((item) => String(item.id) === institutionId)
-          : null) || null;
       setSacco(ownSacco);
       setTransactions((txRes.transactions || []) as SaccoTx[]);
     } catch (err) {
@@ -56,6 +64,39 @@ export default function SaccoHomePage() {
       setLoading(false);
     }
   }, [institutionId]);
+
+  async function handleSaveEdit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!institutionId) return;
+    setIsSavingEdit(true);
+    setEditError("");
+    try {
+      const payload: {
+        name: string;
+        licenseNumber: string | null;
+        code?: string;
+        externalOrgId?: string | null;
+      } = {
+        name: editName.trim(),
+        licenseNumber: editLicenseNumber.trim() || null,
+      };
+      const nextCode = editCode.trim();
+      const nextOrgId = editExternalOrgId.trim();
+      if (nextCode && nextCode !== String(sacco?.code || user?.institution?.code || "")) {
+        payload.code = nextCode;
+      }
+      if (nextOrgId !== String(sacco?.externalOrgId || "")) {
+        payload.externalOrgId = nextOrgId;
+      }
+      await updatePartnerSacco(institutionId, payload);
+      setIsEditOpen(false);
+      await loadData();
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Failed to update SACCO");
+    } finally {
+      setIsSavingEdit(false);
+    }
+  }
 
   useEffect(() => {
     void loadData();
@@ -86,15 +127,38 @@ export default function SaccoHomePage() {
         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
           Institution Partner Console
         </p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">
-          {user?.institution?.name || "SACCO dashboard"}
-        </h1>
-        <p className="mt-1 text-sm text-slate-600">
-          Code: <span className="font-medium text-slate-800">{user?.institution?.code || "—"}</span>
-        </p>
-        <p className="mt-2 inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">
-          Role: {String(user?.permissions?.role || "VIEWER")}
-        </p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">
+              {user?.institution?.name || "SACCO dashboard"}
+            </h1>
+            <p className="mt-1 text-sm text-slate-600">
+              Code: <span className="font-medium text-slate-800">{user?.institution?.code || "—"}</span>
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <p className="inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">
+                Role: {String(user?.permissions?.role || "VIEWER")}
+              </p>
+              <StatusBadge status={sacco?.status} />
+            </div>
+          </div>
+          {canEditSacco ? (
+            <button
+              type="button"
+              onClick={() => {
+                setEditName(String(sacco?.name || user?.institution?.name || ""));
+                setEditCode(String(sacco?.code || user?.institution?.code || ""));
+                setEditExternalOrgId(String(sacco?.externalOrgId || ""));
+                setEditLicenseNumber(String(sacco?.licenseNumber || ""));
+                setEditError("");
+                setIsEditOpen(true);
+              }}
+              className={ipc.btnSecondary}
+            >
+              Edit SACCO details
+            </button>
+          ) : null}
+        </div>
       </section>
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -115,7 +179,9 @@ export default function SaccoHomePage() {
         </article>
         <article className={ipc.metricTile}>
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Status</p>
-          <p className="mt-2 text-2xl font-bold tabular-nums text-slate-900">{String(sacco?.status || "ACTIVE")}</p>
+          <p className="mt-2 text-xl font-bold text-slate-900">
+            <StatusBadge status={sacco?.status || "ACTIVE"} />
+          </p>
           <p className="mt-1 text-xs text-slate-600">Institution status in core.</p>
         </article>
       </section>
@@ -193,6 +259,22 @@ export default function SaccoHomePage() {
           </Link>
         </div>
       </section>
+
+      <EditSaccoModal
+        open={isEditOpen}
+        isSubmitting={isSavingEdit}
+        error={editError}
+        code={editCode}
+        externalOrgId={editExternalOrgId}
+        name={editName}
+        licenseNumber={editLicenseNumber}
+        onCodeChange={setEditCode}
+        onExternalOrgIdChange={setEditExternalOrgId}
+        onNameChange={setEditName}
+        onLicenseNumberChange={setEditLicenseNumber}
+        onClose={() => setIsEditOpen(false)}
+        onSubmit={handleSaveEdit}
+      />
     </div>
   );
 }

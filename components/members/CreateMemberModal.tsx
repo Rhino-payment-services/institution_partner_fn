@@ -19,6 +19,7 @@ type Props = {
   memberDisplayName: string;
   memberPhone: string;
   memberNationalId: string;
+  memberNationalIdNotApplicable: boolean;
   memberAccountNo: string;
   memberEmail: string;
   memberClientId: string;
@@ -32,6 +33,7 @@ type Props = {
   onDisplayNameChange: (v: string) => void;
   onPhoneChange: (v: string) => void;
   onNationalIdChange: (v: string) => void;
+  onNationalIdNotApplicableChange: (v: boolean) => void;
   onAccountNoChange: (v: string) => void;
   onEmailChange: (v: string) => void;
   onClientIdChange: (v: string) => void;
@@ -52,6 +54,7 @@ export function CreateMemberModal({
   memberDisplayName,
   memberPhone,
   memberNationalId,
+  memberNationalIdNotApplicable,
   memberAccountNo,
   memberEmail,
   memberClientId,
@@ -65,6 +68,7 @@ export function CreateMemberModal({
   onDisplayNameChange,
   onPhoneChange,
   onNationalIdChange,
+  onNationalIdNotApplicableChange,
   onAccountNoChange,
   onEmailChange,
   onClientIdChange,
@@ -210,9 +214,19 @@ export function CreateMemberModal({
                 id="member-national-id"
                 value={memberNationalId}
                 onChange={(e) => onNationalIdChange(e.target.value)}
-                className={`${ipc.input} mt-1.5 ${formErrors.nationalId ? ipc.inputError : ""}`}
+                disabled={memberNationalIdNotApplicable}
+                placeholder={memberNationalIdNotApplicable ? "Not applicable" : undefined}
+                className={`${ipc.input} mt-1.5 ${formErrors.nationalId ? ipc.inputError : ""} disabled:bg-slate-100 disabled:text-slate-500`}
                 aria-invalid={Boolean(formErrors.nationalId)}
               />
+              <label className="mt-2 flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={memberNationalIdNotApplicable}
+                  onChange={(e) => onNationalIdNotApplicableChange(e.target.checked)}
+                />
+                NIN not available / not applicable
+              </label>
               {formErrors.nationalId ? <p className={ipc.fieldError}>{formErrors.nationalId}</p> : null}
             </div>
             <div>

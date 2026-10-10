@@ -1,16 +1,29 @@
 "use client";
 
-import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
-import { createPartnerSacco, listPartnerSaccos } from "@/lib/api";
+import {
+  createPartnerSacco,
+  deletePartnerSacco,
+  listPartnerSaccos,
+  restorePartnerSacco,
+  setSaccoStatus,
+  updatePartnerSacco,
+} from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { ipc } from "@/lib/dashboard-ui";
+import { ConfirmActionModal } from "@/components/common/ConfirmActionModal";
+import { StatusBadge } from "@/components/common/StatusBadge";
+import { StatusFilterTabs, type StatusTab } from "@/components/common/StatusFilterTabs";
+import { EditSaccoModal } from "@/components/saccos/EditSaccoModal";
+import { DELETED_RECORD_COPY, SaccoLifecycleActions } from "@/components/saccos/SaccoLifecycleActions";
 
 type SaccoItem = {
   id: string;
   code?: string;
   name?: string;
   licenseNumber?: string | null;
+  externalOrgId?: string | null;
+  status?: string;
   totalCollectedBalance?: number;
   balanceCurrency?: string;
   _count?: {
@@ -18,14 +31,23 @@ type SaccoItem = {
   };
 };
 
+type PendingSaccoAction = "inactive" | "active" | "delete" | "restore" | null;
+
 export default function SaccosPage() {
   const { user } = useAuth();
-  const canCreateSacco = Boolean(
-    user?.scope !== "INSTITUTION" &&
-      (user?.permissions?.canManageMembers ||
-        user?.permissions?.canManageInstitution ||
-        user?.permissions?.role === "OWNER"),
+  const authRole = String(user?.permissions?.role || "").toUpperCase();
+  const isPartnerScope = user?.scope !== "INSTITUTION";
+  const canManageInstitution = Boolean(
+    user?.permissions?.canManageInstitution || authRole === "OWNER" || authRole === "ADMIN",
   );
+  const canCreateSacco = Boolean(
+    isPartnerScope &&
+      (user?.permissions?.canManageMembers ||
+        canManageInstitution ||
+        authRole === "OWNER" ||
+        authRole === "ADMIN"),
+  );
+  const canChangeSaccoStatus = isPartnerScope && canManageInstitution;
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   /** When inviting initial staff, step 1 = SACCO details; step 2 = staff contact & role. */
   const [createModalStep, setCreateModalStep] = useState<1 | 2>(1);
@@ -44,18 +66,109 @@ export default function SaccosPage() {
   const [saccos, setSaccos] = useState<SaccoItem[]>([]);
   const [error, setError] = useState("");
   const [feedback, setFeedback] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusTab>("");
+  const [editingSacco, setEditingSacco] = useState<SaccoItem | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editCode, setEditCode] = useState("");
+  const [editExternalOrgId, setEditExternalOrgId] = useState("");
+  const [editLicenseNumber, setEditLicenseNumber] = useState("");
+  const [editError, setEditError] = useState("");
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [pendingAction, setPendingAction] = useState<PendingSaccoAction>(null);
+  const [pendingSacco, setPendingSacco] = useState<SaccoItem | null>(null);
+  const [actionReason, setActionReason] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [isSubmittingAction, setIsSubmittingAction] = useState(false);
 
   useEffect(() => {
     void loadSaccos();
-  }, []);
+  }, [statusFilter]);
 
   async function loadSaccos() {
     setError("");
     try {
-      const data = (await listPartnerSaccos()) as SaccoItem[];
+      const data = (await listPartnerSaccos(statusFilter || undefined)) as SaccoItem[];
       setSaccos(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load SACCOs");
+    }
+  }
+
+  function openEdit(sacco: SaccoItem) {
+    setEditingSacco(sacco);
+    setEditName(String(sacco.name || ""));
+    setEditCode(String(sacco.code || ""));
+    setEditExternalOrgId(String(sacco.externalOrgId || ""));
+    setEditLicenseNumber(String(sacco.licenseNumber || ""));
+    setEditError("");
+  }
+
+  async function handleSaveEdit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!editingSacco) return;
+    setIsSavingEdit(true);
+    setEditError("");
+    try {
+      const payload: {
+        name: string;
+        licenseNumber: string | null;
+        code?: string;
+        externalOrgId?: string | null;
+      } = {
+        name: editName.trim(),
+        licenseNumber: editLicenseNumber.trim() || null,
+      };
+      const nextCode = editCode.trim();
+      const nextOrgId = editExternalOrgId.trim();
+      if (nextCode && nextCode !== String(editingSacco.code || "")) {
+        payload.code = nextCode;
+      }
+      if (nextOrgId !== String(editingSacco.externalOrgId || "")) {
+        payload.externalOrgId = nextOrgId;
+      }
+      await updatePartnerSacco(editingSacco.id, payload);
+      setFeedback("SACCO details updated.");
+      setEditingSacco(null);
+      await loadSaccos();
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Failed to update SACCO");
+    } finally {
+      setIsSavingEdit(false);
+    }
+  }
+
+  function openStatusAction(sacco: SaccoItem, action: PendingSaccoAction) {
+    setPendingSacco(sacco);
+    setPendingAction(action);
+    setActionReason("");
+    setActionError("");
+  }
+
+  async function handleConfirmStatusAction() {
+    if (!pendingSacco || !pendingAction) return;
+    setIsSubmittingAction(true);
+    setActionError("");
+    try {
+      if (pendingAction === "inactive") {
+        await setSaccoStatus(pendingSacco.id, { status: "INACTIVE", reason: actionReason.trim() || undefined });
+        setFeedback("SACCO marked inactive.");
+      } else if (pendingAction === "active") {
+        await setSaccoStatus(pendingSacco.id, { status: "ACTIVE", reason: actionReason.trim() || undefined });
+        setFeedback("SACCO marked active.");
+      } else if (pendingAction === "delete") {
+        await deletePartnerSacco(pendingSacco.id, actionReason.trim() || undefined);
+        setFeedback("SACCO marked as deleted. History is preserved.");
+      } else if (pendingAction === "restore") {
+        await restorePartnerSacco(pendingSacco.id, actionReason.trim() || undefined);
+        setFeedback("SACCO restored to inactive.");
+      }
+      setPendingAction(null);
+      setPendingSacco(null);
+      await loadSaccos();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to update SACCO");
+    } finally {
+      setIsSubmittingAction(false);
     }
   }
 
@@ -193,7 +306,10 @@ export default function SaccosPage() {
 
       <section>
         <article className={`${ipc.card} ${ipc.cardPad}`}>
-          <h3 className="text-lg font-semibold tracking-tight text-slate-900">Existing SACCOs</h3>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <h3 className="text-lg font-semibold tracking-tight text-slate-900">Existing SACCOs</h3>
+            <StatusFilterTabs value={statusFilter} onChange={setStatusFilter} />
+          </div>
           <div className={`mt-4 ${ipc.tableWrap}`}>
             <table className={ipc.table}>
               <thead>
@@ -201,26 +317,46 @@ export default function SaccosPage() {
                   <th className={ipc.th}>Code</th>
                   <th className={ipc.th}>Name</th>
                   <th className={ipc.th}>License</th>
+                  <th className={ipc.th}>Status</th>
                   <th className={ipc.th}>Collected balance</th>
                   <th className={ipc.th}>Members</th>
-                  <th className={`${ipc.th} text-right`}>Open</th>
+                  <th className={`${ipc.th} text-right`}>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {saccos.map((item) => (
-                  <tr key={String(item.id)} className={ipc.tbodyRow}>
-                    <td className={`${ipc.td} font-medium`}>{String(item.code || "—")}</td>
-                    <td className={ipc.td}>{String(item.name || "—")}</td>
-                    <td className={ipc.td}>{item.licenseNumber ? String(item.licenseNumber) : "—"}</td>
-                    <td className={ipc.tdNum}>{formatMoney(item.totalCollectedBalance, item.balanceCurrency)}</td>
-                    <td className={ipc.tdNum}>{Number(item?._count?.members || 0)}</td>
-                    <td className={`${ipc.td} text-right`}>
-                      <Link href={`/dashboard/saccos/${String(item.id)}`} className={ipc.link}>
-                        View
-                      </Link>
+                {saccos.length === 0 ? (
+                  <tr>
+                    <td className={`${ipc.td} text-slate-600`} colSpan={7}>
+                      No SACCOs found for this filter.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  saccos.map((item) => (
+                    <tr key={String(item.id)} className={ipc.tbodyRow}>
+                      <td className={`${ipc.td} font-medium`}>{String(item.code || "—")}</td>
+                      <td className={ipc.td}>{String(item.name || "—")}</td>
+                      <td className={ipc.td}>{item.licenseNumber ? String(item.licenseNumber) : "—"}</td>
+                      <td className={ipc.td}>
+                        <StatusBadge status={item.status} />
+                      </td>
+                      <td className={ipc.tdNum}>{formatMoney(item.totalCollectedBalance, item.balanceCurrency)}</td>
+                      <td className={ipc.tdNum}>{Number(item?._count?.members || 0)}</td>
+                      <td className={`${ipc.td} text-right`}>
+                        <SaccoLifecycleActions
+                          status={item.status}
+                          canEdit={canManageInstitution}
+                          canChangeStatus={canChangeSaccoStatus}
+                          viewHref={`/dashboard/saccos/${String(item.id)}`}
+                          onEdit={() => openEdit(item)}
+                          onMakeInactive={() => openStatusAction(item, "inactive")}
+                          onMakeActive={() => openStatusAction(item, "active")}
+                          onDelete={() => openStatusAction(item, "delete")}
+                          onRestore={() => openStatusAction(item, "restore")}
+                        />
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
@@ -477,6 +613,63 @@ export default function SaccosPage() {
           </div>
         </div>
       )}
+
+      <EditSaccoModal
+        open={Boolean(editingSacco)}
+        isSubmitting={isSavingEdit}
+        error={editError}
+        code={editCode}
+        externalOrgId={editExternalOrgId}
+        name={editName}
+        licenseNumber={editLicenseNumber}
+        onCodeChange={setEditCode}
+        onExternalOrgIdChange={setEditExternalOrgId}
+        onNameChange={setEditName}
+        onLicenseNumberChange={setEditLicenseNumber}
+        onClose={() => setEditingSacco(null)}
+        onSubmit={handleSaveEdit}
+      />
+
+      <ConfirmActionModal
+        open={Boolean(pendingAction && pendingSacco)}
+        title={
+          pendingAction === "delete"
+            ? "Delete SACCO"
+            : pendingAction === "restore"
+              ? "Restore SACCO"
+              : pendingAction === "inactive"
+                ? "Make SACCO inactive"
+                : "Make SACCO active"
+        }
+        explanation={
+          pendingAction === "delete"
+            ? DELETED_RECORD_COPY
+            : pendingAction === "restore"
+              ? "This restores the SACCO to INACTIVE if no live SACCO already uses the same code or external org ID."
+              : pendingAction === "inactive"
+                ? "Inactive SACCOs stay in the list. Members and history are preserved."
+                : "This SACCO will be available for live operations again."
+        }
+        confirmLabel={
+          pendingAction === "delete"
+            ? "Delete"
+            : pendingAction === "restore"
+              ? "Restore"
+              : pendingAction === "inactive"
+                ? "Make Inactive"
+                : "Make Active"
+        }
+        danger={pendingAction === "delete"}
+        reason={actionReason}
+        isSubmitting={isSubmittingAction}
+        error={actionError}
+        onReasonChange={setActionReason}
+        onClose={() => {
+          setPendingAction(null);
+          setPendingSacco(null);
+        }}
+        onConfirm={() => void handleConfirmStatusAction()}
+      />
     </div>
   );
 }

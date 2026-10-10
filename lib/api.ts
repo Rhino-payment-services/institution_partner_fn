@@ -71,12 +71,30 @@ type CreateSaccoUserPayload = {
   lastName: string;
   displayName?: string;
   phone: string;
-  nationalId: string;
+  nationalId?: string;
+  nationalIdNotApplicable?: boolean;
   email?: string;
   accountNo?: string;
   clientId?: string;
   status?: string;
   acknowledgePhoneNameMismatch?: boolean;
+};
+
+type UpdateSaccoUserPayload = {
+  displayName?: string;
+  email?: string;
+  accountNo?: string;
+  clientId?: string;
+  status?: string;
+};
+
+type UpdateSaccoStaffPayload = {
+  role?: "OWNER" | "ADMIN" | "OPERATOR" | "VIEWER";
+  accountStatus?: "ACTIVE" | "INACTIVE";
+  canViewTransactions?: boolean;
+  canManageMembers?: boolean;
+  canManageInstitution?: boolean;
+  canRequestLiquidation?: boolean;
 };
 
 type CreateSaccoStaffPayload = {
@@ -134,8 +152,9 @@ async function authFetch(input: RequestInfo | URL, init?: RequestInit) {
   return response;
 }
 
-export async function listPartnerSaccos() {
-  const response = await authFetch(`${API_CONFIG.baseUrl}/partner-institutions`, {
+export async function listPartnerSaccos(status?: string) {
+  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+  const response = await authFetch(`${API_CONFIG.baseUrl}/partner-institutions${query}`, {
     headers: getAuthHeaders(),
   });
 
@@ -307,6 +326,27 @@ export async function createPartnerStaff(
   return data;
 }
 
+export async function updatePartnerStaff(
+  memberId: string,
+  payload: {
+    role?: PartnerStaffRole;
+    canViewTransactions?: boolean;
+    canManageApiKeys?: boolean;
+    canViewAnalytics?: boolean;
+    canManageMembers?: boolean;
+    canConfigureTariffs?: boolean;
+  },
+) {
+  const response = await authFetch(`${API_CONFIG.baseUrl}/partner/members/${memberId}`, {
+    method: "PATCH",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to update partner staff");
+  return data;
+}
+
 export async function createSaccoUser(institutionId: string, payload: CreateSaccoUserPayload) {
   const response = await authFetch(
     `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/users`,
@@ -336,9 +376,116 @@ export async function createSaccoUser(institutionId: string, payload: CreateSacc
   return data;
 }
 
-export async function listSaccoUsers(institutionId: string) {
+export async function getPartnerSacco(institutionId: string) {
   const response = await authFetch(
-    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/users`,
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}`,
+    { headers: getAuthHeaders() },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to fetch SACCO");
+  return data as Record<string, unknown>;
+}
+
+export async function updatePartnerSacco(
+  institutionId: string,
+  payload: {
+    name?: string;
+    code?: string;
+    externalOrgId?: string | null;
+    licenseNumber?: string | null;
+    contact?: Record<string, unknown>;
+  },
+) {
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}`,
+    {
+      method: "PATCH",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload),
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to update SACCO");
+  return data as Record<string, unknown>;
+}
+
+export async function setSaccoStatus(
+  institutionId: string,
+  payload: { status: "ACTIVE" | "INACTIVE"; reason?: string },
+) {
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/status`,
+    {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload),
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to update SACCO status");
+  return data as Record<string, unknown>;
+}
+
+export async function deletePartnerSacco(institutionId: string, reason?: string) {
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}`,
+    {
+      method: "DELETE",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(reason ? { reason } : {}),
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to delete SACCO");
+  return data as Record<string, unknown>;
+}
+
+export async function restorePartnerSacco(institutionId: string, reason?: string) {
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/restore`,
+    {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(reason ? { reason } : {}),
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to restore SACCO");
+  return data as Record<string, unknown>;
+}
+
+export async function listSaccoAudit(
+  institutionId: string,
+  params?: { entityType?: string; entityId?: string },
+) {
+  const search = new URLSearchParams();
+  if (params?.entityType) search.set("entityType", params.entityType);
+  if (params?.entityId) search.set("entityId", params.entityId);
+  const query = search.toString() ? `?${search.toString()}` : "";
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/audit${query}`,
+    { headers: getAuthHeaders() },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to fetch audit history");
+  return data as Array<{
+    id: string;
+    entityType?: string;
+    entityId?: string;
+    action?: string;
+    previousStatus?: string | null;
+    newStatus?: string | null;
+    reason?: string | null;
+    actorEmail?: string | null;
+    actorScope?: string | null;
+    createdAt?: string;
+  }>;
+}
+
+export async function listSaccoUsers(institutionId: string, status?: string) {
+  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/users${query}`,
     {
       headers: getAuthHeaders(),
     },
@@ -359,15 +506,175 @@ export async function listSaccoUsers(institutionId: string) {
       user?: {
         email?: string | null;
         phone?: string | null;
-        profile?: { firstName?: string | null; lastName?: string | null } | null;
+        profile?: {
+          firstName?: string | null;
+          lastName?: string | null;
+          nationalId?: string | null;
+        } | null;
       } | null;
     }>;
   };
 }
 
-export async function listSaccoTransactions(institutionId: string) {
+export async function updateSaccoUser(
+  institutionId: string,
+  memberId: string,
+  payload: UpdateSaccoUserPayload,
+) {
   const response = await authFetch(
-    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/transactions`,
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/users/${memberId}`,
+    {
+      method: "PATCH",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload),
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to update SACCO member");
+  return data;
+}
+
+export async function deleteSaccoUser(
+  institutionId: string,
+  memberId: string,
+  reason?: string,
+) {
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/users/${memberId}`,
+    {
+      method: "DELETE",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(reason ? { reason } : {}),
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to delete SACCO member");
+  return data as { success?: boolean; message?: string };
+}
+
+export async function setSaccoUserStatus(
+  institutionId: string,
+  memberId: string,
+  payload: { status: "ACTIVE" | "INACTIVE"; reason?: string },
+) {
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/users/${memberId}/status`,
+    {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload),
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to update member status");
+  return data as { success?: boolean; status?: string; message?: string };
+}
+
+export async function restoreSaccoUser(
+  institutionId: string,
+  memberId: string,
+  reason?: string,
+) {
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/users/${memberId}/restore`,
+    {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(reason ? { reason } : {}),
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to restore SACCO member");
+  return data as { success?: boolean; status?: string; message?: string };
+}
+
+export async function updateSaccoStaff(
+  institutionId: string,
+  memberId: string,
+  payload: UpdateSaccoStaffPayload,
+) {
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/staff/${memberId}`,
+    {
+      method: "PATCH",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload),
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to update SACCO staff role");
+  return data;
+}
+
+export type SaccoMemberPhoneValidation = {
+  status: "OK" | "MISMATCH" | "ERROR";
+  matchStatus?: "MATCHED" | "FLEXIBLE";
+  officialName?: string;
+  error?: string;
+};
+
+export async function validateSaccoMemberPhone(
+  institutionId: string,
+  payload: { firstName: string; lastName: string; phone: string },
+) {
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/users/validate-phone`,
+    {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify(payload),
+    },
+  );
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.message || "Failed to validate phone");
+  return data as SaccoMemberPhoneValidation;
+}
+
+export async function createSaccoUsersBulkSequential(
+  institutionId: string,
+  rows: CreateSaccoUserPayload[],
+) {
+  const results: Array<{
+    index: number;
+    success: boolean;
+    error?: string;
+  }> = [];
+
+  for (let i = 0; i < rows.length; i += 1) {
+    const row = rows[i];
+    try {
+      await createSaccoUser(institutionId, row);
+      results.push({ index: i + 1, success: true });
+    } catch (err) {
+      const apiErr = err as Error;
+      results.push({
+        index: i + 1,
+        success: false,
+        error: apiErr.message || "Failed to create user",
+      });
+    }
+  }
+
+  const successCount = results.filter((r) => r.success).length;
+  return {
+    total: results.length,
+    successCount,
+    failCount: results.length - successCount,
+    results,
+  };
+}
+
+export async function listSaccoTransactions(
+  institutionId: string,
+  query?: { page?: number; limit?: number; memberId?: string },
+) {
+  const params = new URLSearchParams();
+  if (query?.page) params.set("page", String(query.page));
+  if (query?.limit) params.set("limit", String(query.limit));
+  if (query?.memberId) params.set("memberId", query.memberId);
+  const qs = params.toString();
+  const response = await authFetch(
+    `${API_CONFIG.baseUrl}/partner-institutions/${institutionId}/transactions${qs ? `?${qs}` : ""}`,
     {
       headers: getAuthHeaders(),
     },
@@ -375,7 +682,7 @@ export async function listSaccoTransactions(institutionId: string) {
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data?.message || "Failed to fetch SACCO transactions");
-  return data as {
+  const payload = (data?.data ?? data) as {
     institution?: { id?: string; name?: string; code?: string };
     total?: number;
     transactions?: Array<{
@@ -398,6 +705,18 @@ export async function listSaccoTransactions(institutionId: string) {
         } | null;
       } | null;
     }>;
+    pagination?: {
+      page?: number;
+      limit?: number;
+      total?: number;
+      totalPages?: number;
+    };
+  };
+  return {
+    institution: payload.institution,
+    total: payload.total ?? payload.pagination?.total ?? payload.transactions?.length ?? 0,
+    transactions: payload.transactions || [],
+    pagination: payload.pagination,
   };
 }
 
